@@ -20,8 +20,22 @@ def get_spike_trains():
     return trains, list(df.columns)
 
 
-def plot_raster(t_start=None, t_end=None):
+def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):
     trains, labels = get_spike_trains()
+
+    # Filter by explicit neuron indices.
+    if neuron_indices is not None:
+        trains = [trains[i] for i in neuron_indices]
+        labels = [labels[i] for i in neuron_indices]
+
+    # Filter by area substring (case-insensitive match against label).
+    if area is not None:
+        mask = [area.lower() in lbl.lower() for lbl in labels]
+        trains = [t for t, m in zip(trains, mask) if m]
+        labels = [l for l, m in zip(labels, mask) if m]
+
+    if not trains:
+        raise ValueError("No neurons match the given selection.")
 
     # Optional time window — keep only spikes inside [t_start, t_end].
     if t_start is not None or t_end is not None:
@@ -63,8 +77,17 @@ def plot_raster(t_start=None, t_end=None):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Spike raster plot")
-    parser.add_argument("t_start", nargs="?", type=float, default=None, help="Start time (s)")
-    parser.add_argument("t_end",   nargs="?", type=float, default=None, help="End time (s)")
+    parser.add_argument("t_start",   nargs="?",  type=float, default=None, help="Start time (s)")
+    parser.add_argument("t_end",     nargs="?",  type=float, default=None, help="End time (s)")
+    parser.add_argument("--neurons", nargs="+",  type=int,   default=None, help="Neuron indices to show, e.g. --neurons 0 1 5")
+    parser.add_argument("--area",                type=str,   default=None, help="Show only neurons whose label contains this string, e.g. --area MFG")
+    parser.add_argument("--list",    action="store_true",                  help="Print all neuron indices and labels, then exit")
     args = parser.parse_args()
-    plot_raster(args.t_start, args.t_end)
-    plt.show()
+
+    if args.list:
+        _, labels = get_spike_trains()
+        for i, lbl in enumerate(labels):
+            print(f"{i:4d}  {lbl}")
+    else:
+        plot_raster(args.t_start, args.t_end, neuron_indices=args.neurons, area=args.area)
+        plt.show()

@@ -1,2 +1,4 @@
 # MATLAB data files - static, not tracked in git
 *.mat
+# CSV files - static, not tracked in git
+*.csv

@@ -3,7 +3,7 @@ import scipy.io
 import numpy as np
 import pandas as pd
 
-SESSION = "20250602"
+SESSION = "test_session"
 DATA_DIR = os.path.join(os.path.dirname(__file__), SESSION)
 
 pd.set_option("display.max_columns", 20)
