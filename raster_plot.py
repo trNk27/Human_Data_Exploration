@@ -5,19 +5,10 @@ bottom-padded with NaN. We strip the NaNs per column and draw one row
 per neuron with matplotlib's eventplot.
 """
 
-import os
-import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
 
-from file_explorer import SESSION, DATA_DIR, load_stmtx, load_sr
-
-
-def get_spike_trains():
-    """Return a list of 1-D arrays (spike times in seconds), one per neuron."""
-    df = load_stmtx()                       # (samples, units), NaN-padded
-    trains = [df[col].dropna().to_numpy() for col in df.columns]
-    return trains, list(df.columns)
+from utils import SESSION, get_spike_trains
 
 
 def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):

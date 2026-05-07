@@ -8,8 +8,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from file_explorer import SESSION
-from raster_plot import get_spike_trains
+from utils import SESSION, get_spike_trains, MAX_NEURONS
 
 
 def compute_acg(spike_times, lag_ms=200, bin_ms=1):
@@ -46,9 +45,6 @@ def compute_acg(spike_times, lag_ms=200, bin_ms=1):
     counts[lag_bins] = 0  # zero-lag bin: exclude self-coincidences
 
     return centres, counts
-
-
-MAX_NEURONS = 90  # hard cap — avoids out-of-memory on large sessions
 
 
 def plot_acg(neuron_indices=None, area=None, lag_ms=200, bin_ms=1):
