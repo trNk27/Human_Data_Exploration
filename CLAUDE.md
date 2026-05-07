@@ -46,6 +46,12 @@ Derived per-trial table (one row per trial, all timing in **seconds**) with ~50 
 
 The active session is set by `SESSION` in `utils.py:12` — change it there to switch sessions. All loaders (`load_sr`, `load_stmtx`, `load_trials_sync`, `get_spike_trains`) accept an optional `data_dir` to target a different session without changing the constant.
 
+## Units convention
+
+- **Analysis time parameters** (bin sizes, PSTH windows) are in **milliseconds** — `bin_ms`, `pre_ms`, `post_ms`, `lag_ms`.
+- **Absolute timestamps and event times** (spike times, trial event columns after `sp_to_s`) remain in **seconds**, as stored in the data.
+- Internal conversion at function entry: `bin_s = bin_ms / 1000`, etc. `compute_psth` returns bin centres in ms.
+
 ## Repo conventions
 
 - `.mat`; `.csv` files are gitignored — they are large, static, externally produced inputs. Do not commit them. Adding a session = dropping a new `YYYYMMDD/` directory next to the existing ones.

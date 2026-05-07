@@ -9,7 +9,7 @@ import scipy.io
 import numpy as np
 import pandas as pd
 
-SESSION  = "20250707"
+SESSION  = "20250521"
 DATA_DIR = os.path.join(os.path.dirname(__file__), SESSION)
 
 MAX_NEURONS = 90  # hard cap shared by psth and autocorrelogram
