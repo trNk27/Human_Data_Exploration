@@ -42,3 +42,8 @@ The session being inspected is selected by the `SESSION` constant at `file_explo
 ## Repo conventions
 
 - `.mat` files are gitignored — they are large, static, externally produced inputs. Do not commit them. Adding a session = dropping a new `YYYYMMDD/` directory next to the existing ones.
+
+## Python conventions
+- Always save Python code to a `.py` file before running it.
+- Run scripts with `python <file>.py`, not via inline `python -c` or heredocs.
+- Use `scripts/` for one-off scripts, `src/` for application code.

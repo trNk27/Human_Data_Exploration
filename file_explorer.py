@@ -3,7 +3,7 @@ import scipy.io
 import numpy as np
 import pandas as pd
 
-SESSION = "test_session"
+SESSION = "20250707"
 DATA_DIR = os.path.join(os.path.dirname(__file__), SESSION)
 
 pd.set_option("display.max_columns", 20)
@@ -11,14 +11,16 @@ pd.set_option("display.width", 120)
 pd.set_option("display.float_format", "{:.4f}".format)
 
 
-def load_sr():
-    data = scipy.io.loadmat(os.path.join(DATA_DIR, "SR.mat"))
+def load_sr(data_dir=None):
+    data_dir = data_dir or DATA_DIR
+    data = scipy.io.loadmat(os.path.join(data_dir, "SR.mat"))
     sr = int(data["SR"].flat[0])
     return pd.DataFrame({"SamplingRate_Hz": [sr]})
 
 
-def load_stmtx():
-    data = scipy.io.loadmat(os.path.join(DATA_DIR, "STMtx.mat"))
+def load_stmtx(data_dir=None):
+    data_dir = data_dir or DATA_DIR
+    data = scipy.io.loadmat(os.path.join(data_dir, "STMtx.mat"))
     matrix = data["STMtx"]          # (samples, units)
     info = data["infoCell"]         # (units, 4): area, electrode, unit, type
 
@@ -33,8 +35,9 @@ def load_stmtx():
     return pd.DataFrame(matrix, columns=cols)
 
 
-def load_trials_sync():
-    data = scipy.io.loadmat(os.path.join(DATA_DIR, "Trials_Sync.mat"))
+def load_trials_sync(data_dir=None):
+    data_dir = data_dir or DATA_DIR
+    data = scipy.io.loadmat(os.path.join(data_dir, "Trials_Sync.mat"))
     matrix = data["Trials_Sync"]    # (trials, 19)
     # Columns 1-14 are behavioural; 15-19 are timing in sampling points (divide by SR for seconds).
     # ChosenSide (col 12) is unreliable per README — use ChosenArm (col 13) instead.

@@ -49,14 +49,15 @@ def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):
     # +++ Fast method (but a little bad)
 
     # Flatten (times, neuron_idx) and draw with a single ax.plot using "|" markers.
+    
     # eventplot creates one LineCollection segment per spike — at ~10M+ spikes
     # per session that takes ~minute. One Line2D with N points is orders faster.
     #times   = np.concatenate(trains) if trains else np.array([])
     #neurons = np.repeat(np.arange(len(trains)), [len(t) for t in trains])
     #ax.plot(times, neurons, "|", color="black", markersize=3, markeredgewidth=0.5)
 
-    # +++ Slow method (but a little more accurate)
 
+    # +++ Slow method (but a little more accurate)
 
     # eventplot draws one tick per spike, one row per neuron.
     ax.eventplot(trains, colors="black", linelengths=0.8, linewidths=0.5)
