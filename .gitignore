@@ -2,3 +2,5 @@
 *.mat
 # CSV files - static, not tracked in git
 *.csv
+# result plots - too many, not tracked
+*.png

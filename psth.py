@@ -36,6 +36,15 @@ EVENT_STYLE = {
     "start":    dict(color="gray",      linestyle="--", label="Trial start"),
 }
 
+# Trial split: (ChosenArm_G1S0, Rewarded). NaN/non-responding trials are
+# naturally excluded by the integer equality checks.
+CONDITIONS = {
+    "gamble_reward":   dict(arm=1, rewarded=1, color="darkorange", label="Gamble + Rew"),
+    "gamble_noreward": dict(arm=1, rewarded=0, color="firebrick",  label="Gamble + No"),
+    "safe_reward":     dict(arm=0, rewarded=1, color="seagreen",   label="Safe + Rew"),
+    "safe_noreward":   dict(arm=0, rewarded=0, color="steelblue",  label="Safe + No"),
+}
+
 
 def compute_psth(spike_times, event_times_s, pre_ms, post_ms, bin_ms):
     """Return (bin_centres_ms, firing_rate_hz) for spikes aligned to events.
@@ -68,7 +77,8 @@ def compute_psth(spike_times, event_times_s, pre_ms, post_ms, bin_ms):
 
 
 def plot_psth(neuron_indices=None, area=None, event="cue",
-              pre_ms=500, post_ms=1000, bin_ms=50, sigma_ms=None):
+              pre_ms=500, post_ms=1000, bin_ms=50, sigma_ms=None,
+              by_condition=False):
     """Plot one PSTH subplot per neuron.
 
     Parameters
@@ -81,6 +91,9 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
     bin_ms         : float                — histogram bin width in ms
     sigma_ms       : float, optional      — Gaussian smoothing kernel SD in ms;
                                             None disables smoothing overlay
+    by_condition   : bool                 — split trials into the four
+                                            (arm, reward) conditions and
+                                            overlay one curve per condition
     """
     if event not in EVENTS:
         raise ValueError(f"event must be one of {list(EVENTS)}")
@@ -109,6 +122,19 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
     sr     = load_sr()["SamplingRate_Hz"].iloc[0]
 
     align_times = sp_to_s(trials, sr, EVENTS[event])
+    responding  = trials["NotResponding"].to_numpy() != 1
+    align_times = np.where(responding, align_times, np.nan)
+
+    cond_masks = None
+    cond_counts = None
+    if by_condition:
+        arm_col = trials["ChosenArm_G1S0"].to_numpy()
+        rew_col = trials["Rewarded"].to_numpy()
+        cond_masks = {
+            name: (arm_col == c["arm"]) & (rew_col == c["rewarded"])
+            for name, c in CONDITIONS.items()
+        }
+        cond_counts = {name: int(np.sum(m)) for name, m in cond_masks.items()}
 
     # Mean timing of other events relative to the alignment point (in ms).
     markers = {}
@@ -131,15 +157,32 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
 
     for idx, (train, label) in enumerate(zip(trains, labels)):
         ax = axes[idx // ncols][idx % ncols]
-        centres, rate = compute_psth(train, align_times, pre_ms, post_ms, bin_ms)
 
-        ax.bar(centres, rate, width=bin_ms, color="steelblue",
-               edgecolor="none", alpha=0.6, label="_nolegend_")
+        if by_condition:
+            for name, cfg in CONDITIONS.items():
+                cond_align = align_times[cond_masks[name]]
+                if cond_align.size == 0:
+                    continue
+                centres, rate = compute_psth(train, cond_align, pre_ms, post_ms, bin_ms)
+                if sigma_ms is not None:
+                    sigma_bins = sigma_ms / bin_ms
+                    rate = gaussian_filter1d(rate, sigma=sigma_bins)
+                    ax.plot(centres, rate, color=cfg["color"], linewidth=1.2,
+                            label=f"{cfg['label']} (n={cond_counts[name]})")
+                else:
+                    ax.step(centres, rate, where="mid", color=cfg["color"],
+                            linewidth=1.0,
+                            label=f"{cfg['label']} (n={cond_counts[name]})")
+        else:
+            centres, rate = compute_psth(train, align_times, pre_ms, post_ms, bin_ms)
 
-        if sigma_ms is not None:
-            sigma_bins = sigma_ms / bin_ms
-            smoothed = gaussian_filter1d(rate, sigma=sigma_bins)
-            ax.plot(centres, smoothed, color="navy", linewidth=1.2, label="_nolegend_")
+            ax.bar(centres, rate, width=bin_ms, color="steelblue",
+                   edgecolor="none", alpha=0.6, label="_nolegend_")
+
+            if sigma_ms is not None:
+                sigma_bins = sigma_ms / bin_ms
+                smoothed = gaussian_filter1d(rate, sigma=sigma_bins)
+                ax.plot(centres, smoothed, color="navy", linewidth=1.2, label="_nolegend_")
 
         ax.axvline(0, color="red", linewidth=1.0, linestyle="--",
                    label=f"{EVENT_STYLE[event]['label']} (align)")
@@ -159,8 +202,9 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
         axes[idx // ncols][idx % ncols].set_visible(False)
 
     smooth_str = f", smoothed σ={sigma_ms:.0f} ms" if sigma_ms is not None else ""
+    cond_str   = "  |  split by (arm, reward)" if by_condition else ""
     fig.suptitle(
-        f"PSTH — session {SESSION}  |  aligned to: {event}"
+        f"PSTH — session {SESSION}  |  aligned to: {event}{cond_str}"
         f"  (pre={pre_ms}ms, post={post_ms}ms, bin={bin_ms}ms{smooth_str})",
         fontsize=9,
     )
@@ -189,6 +233,9 @@ if __name__ == "__main__":
                         help="Show only neurons whose label contains this string")
     parser.add_argument("--list",    action="store_true",
                         help="Print all neuron indices and labels, then exit")
+    parser.add_argument("--by-condition", action="store_true",
+                        help="Overlay one curve per (arm, reward) condition: "
+                             "gamble/safe x rewarded/not")
     args = parser.parse_args()
 
     if args.list:
@@ -204,5 +251,6 @@ if __name__ == "__main__":
             post_ms=args.post,
             bin_ms=args.bin,
             sigma_ms=args.sigma,
+            by_condition=args.by_condition,
         )
         plt.show()
