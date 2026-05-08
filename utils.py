@@ -74,3 +74,20 @@ def get_spike_trains(data_dir=None):
 def sp_to_s(trials, sr, col):
     """Convert a sampling-point column in a Trials_Sync DataFrame to seconds."""
     return trials[col].to_numpy() / sr
+
+
+def add_save_arg(parser):
+    """Add --save [FILE] to an argparse parser."""
+    parser.add_argument(
+        "--save", metavar="FILE", nargs="?", const="",
+        help="Save figure to FILE (auto-named <prefix>_<session>.png if no path given)",
+    )
+
+
+def maybe_save(fig, args, prefix="plot"):
+    """Call fig.savefig if --save was passed; auto-names if no path given."""
+    if args.save is None:
+        return
+    path = args.save if args.save else f"{prefix}_{SESSION}.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    print(f"Saved → {path}")

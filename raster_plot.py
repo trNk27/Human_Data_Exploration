@@ -8,7 +8,7 @@ per neuron with matplotlib's eventplot.
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import SESSION, get_spike_trains
+from utils import SESSION, get_spike_trains, add_save_arg, maybe_save
 
 
 def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):
@@ -74,6 +74,7 @@ if __name__ == "__main__":
     parser.add_argument("--neurons", nargs="+",  type=int,   default=None, help="Neuron indices to show, e.g. --neurons 0 1 5")
     parser.add_argument("--area",                type=str,   default=None, help="Show only neurons whose label contains this string, e.g. --area MFG")
     parser.add_argument("--list",    action="store_true",                  help="Print all neuron indices and labels, then exit")
+    add_save_arg(parser)
     args = parser.parse_args()
 
     if args.list:
@@ -81,5 +82,6 @@ if __name__ == "__main__":
         for i, lbl in enumerate(labels):
             print(f"{i:4d}  {lbl}")
     else:
-        plot_raster(args.t_start, args.t_end, neuron_indices=args.neurons, area=args.area)
+        fig, _ = plot_raster(args.t_start, args.t_end, neuron_indices=args.neurons, area=args.area)
+        maybe_save(fig, args, prefix="raster")
         plt.show()

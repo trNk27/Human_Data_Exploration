@@ -1,0 +1,9 @@
+Anomalies in the date:
+-Sometimes safe results in no reward even when the probability is set to 1
+-Block is sometimes -990 or other very high number? Matlab artefact
+
+
+Questions
+-smoothing over how many ms?
+-multiple events per psth how do we do this?
+

@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
-from utils import SESSION, load_trials_sync, load_sr, get_spike_trains, sp_to_s, MAX_NEURONS
+from utils import SESSION, load_trials_sync, load_sr, get_spike_trains, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
 
 # Sampling-point columns in Trials_Sync that need dividing by SR.
 EVENTS = {
@@ -42,7 +42,7 @@ CONDITIONS = {
     "gamble_reward":   dict(arm=1, rewarded=1, color="darkorange", label="Gamble + Rew"),
     "gamble_noreward": dict(arm=1, rewarded=0, color="firebrick",  label="Gamble + No"),
     "safe_reward":     dict(arm=0, rewarded=1, color="seagreen",   label="Safe + Rew"),
-    "safe_noreward":   dict(arm=0, rewarded=0, color="steelblue",  label="Safe + No"),
+    #"safe_noreward":   dict(arm=0, rewarded=0, color="steelblue",  label="Safe + No"),
 }
 
 
@@ -233,6 +233,7 @@ if __name__ == "__main__":
                         help="Show only neurons whose label contains this string")
     parser.add_argument("--list",    action="store_true",
                         help="Print all neuron indices and labels, then exit")
+    add_save_arg(parser)
     parser.add_argument("--by-condition", action="store_true",
                         help="Overlay one curve per (arm, reward) condition: "
                              "gamble/safe x rewarded/not")
@@ -243,7 +244,7 @@ if __name__ == "__main__":
         for i, lbl in enumerate(labels):
             print(f"{i:4d}  {lbl}")
     else:
-        plot_psth(
+        fig, _ = plot_psth(
             neuron_indices=args.neurons,
             area=args.area,
             event=args.event,
@@ -253,4 +254,5 @@ if __name__ == "__main__":
             sigma_ms=args.sigma,
             by_condition=args.by_condition,
         )
+        maybe_save(fig, args, prefix="psth")
         plt.show()

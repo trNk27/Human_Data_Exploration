@@ -8,7 +8,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import SESSION, get_spike_trains, MAX_NEURONS
+from utils import SESSION, get_spike_trains, MAX_NEURONS, add_save_arg, maybe_save
 
 
 def compute_acg(spike_times, lag_ms=200, bin_ms=1):
@@ -103,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--lag",                type=float, default=200,  help="Max lag in ms (default 200)")
     parser.add_argument("--bin",                type=float, default=1,    help="Bin size in ms (default 1)")
     parser.add_argument("--list", action="store_true",                    help="Print neuron indices and labels, then exit")
+    add_save_arg(parser)
     args = parser.parse_args()
 
     if args.list:
@@ -110,6 +111,7 @@ if __name__ == "__main__":
         for i, lbl in enumerate(labels):
             print(f"{i:4d}  {lbl}")
     else:
-        plot_acg(neuron_indices=args.neurons, area=args.area,
-                 lag_ms=args.lag, bin_ms=args.bin)
+        fig, _ = plot_acg(neuron_indices=args.neurons, area=args.area,
+                          lag_ms=args.lag, bin_ms=args.bin)
+        maybe_save(fig, args, prefix="acg")
         plt.show()
