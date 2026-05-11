@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import utils
 from psth import plot_psth, EVENTS
-from raster_plot import plot_raster
+from raster_plot import plot_raster, plot_aligned_raster
 from autocorrelogram import plot_acg
 
 DATA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -111,7 +111,7 @@ with st.sidebar:
 
     # Plot type
     st.header("Plot type")
-    plot_type = st.radio("Graph", ["PSTH", "Raster", "ACG"])
+    plot_type = st.radio("Graph", ["PSTH", "Raster", "Aligned Raster", "ACG"])
 
     # Parameters
     st.header("Parameters")
@@ -132,6 +132,12 @@ with st.sidebar:
             t_end   = st.number_input("End (s)",   value=100.0, step=1.0, format="%.1f")
         else:
             t_start = t_end = None
+
+    elif plot_type == "Aligned Raster":
+        event    = st.selectbox("Align to", list(EVENTS.keys()))
+        pre_ms   = st.slider("Pre-event (ms)",  100, 2000, 500,  50)
+        post_ms  = st.slider("Post-event (ms)", 100, 2000, 1000, 50)
+        by_cond  = st.checkbox("Colour by condition (arm × reward)")
 
     elif plot_type == "ACG":
         lag_ms = st.slider("Max lag (ms)",  50, 1000, 200, 10)
@@ -168,6 +174,15 @@ if run:
                     neuron_indices=neuron_indices,
                     area=area_filter,
                 )
+            elif plot_type == "Aligned Raster":
+                fig, _ = plot_aligned_raster(
+                    neuron_indices=neuron_indices,
+                    area=area_filter,
+                    event=event,
+                    pre_ms=pre_ms,
+                    post_ms=post_ms,
+                    by_condition=by_cond,
+                )
             elif plot_type == "ACG":
                 fig, _ = plot_acg(
                     neuron_indices=neuron_indices,
@@ -176,7 +191,7 @@ if run:
                     bin_ms=bin_ms,
                 )
         st.session_state.fig_bytes = fig_to_png(fig)
-        st.session_state.fig_name  = f"{plot_type.lower()}_{session}.png"
+        st.session_state.fig_name  = f"{plot_type.lower().replace(' ', '_')}_{session}.png"
         plt.close(fig)
     except ValueError as exc:
         st.error(str(exc))

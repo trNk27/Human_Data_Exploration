@@ -4,3 +4,5 @@
 *.csv
 # result plots - too many, not tracked
 *.png
+# papers - just for claude to learn
+*.pdf
