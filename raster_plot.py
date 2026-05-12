@@ -116,17 +116,6 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
     responding  = trials["NotResponding"].to_numpy() != 1
     align_times = np.where(responding, align_times, np.nan)
 
-    # One colour per trial; default black, overwritten per condition.
-    trial_colors = ["black"] * len(align_times)
-    if by_condition:
-        arm_col = trials["ChosenArm_G1S0"].to_numpy()
-        rew_col = trials["Rewarded"].to_numpy()
-        for name, cfg in CONDITIONS.items():
-            mask = (arm_col == cfg["arm"]) & (rew_col == cfg["rewarded"])
-            for i, m in enumerate(mask):
-                if m:
-                    trial_colors[i] = cfg["color"]
-
     # Mean timing of other events relative to alignment point.
     markers = {}
     for name, col in EVENTS.items():
@@ -139,21 +128,41 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
         if -pre_ms <= mean_rel_ms <= post_ms:
             markers[name] = mean_rel_ms
 
-    n        = len(trains)
-    n_trials = len(align_times)
-    ncols    = min(n, 4)
-    nrows    = math.ceil(n / ncols)
-    row_h    = max(3, 0.08 * n_trials)
+    # Pre-compute condition masks once, outside the neuron loop.
+    cond_masks = None
+    if by_condition:
+        arm_col = trials["ChosenArm_G1S0"].to_numpy()
+        rew_col = trials["Rewarded"].to_numpy()
+        cond_masks = {
+            name: (arm_col == cfg["arm"]) & (rew_col == cfg["rewarded"])
+            for name, cfg in CONDITIONS.items()
+        }
+
+    n     = len(trains)
+    ncols = min(n, 4)
+    nrows = math.ceil(n / ncols)
     fig, axes = plt.subplots(nrows, ncols,
-                             figsize=(5 * ncols, row_h * nrows),
+                             figsize=(5 * ncols, 2 * nrows),
                              squeeze=False)
 
     for idx, (train, label) in enumerate(zip(trains, labels)):
         ax = axes[idx // ncols][idx % ncols]
 
-        spikes_per_trial = compute_aligned_raster(train, align_times, pre_ms, post_ms)
-        ax.eventplot(spikes_per_trial, colors=trial_colors,
-                     linelengths=0.8, linewidths=0.5)
+        if by_condition:
+            for name, cfg in CONDITIONS.items():
+                cond_align  = align_times[cond_masks[name]]
+                cond_spikes = compute_aligned_raster(train, cond_align, pre_ms, post_ms)
+                flat        = np.concatenate(cond_spikes) if cond_spikes else np.array([])
+                if len(flat):
+                    ax.eventplot([flat], lineoffsets=[0], colors=[cfg["color"]],
+                                 linelengths=0.8, linewidths=0.5, alpha=0.1,
+                                 label=cfg["label"])
+        else:
+            spikes_per_trial = compute_aligned_raster(train, align_times, pre_ms, post_ms)
+            flat = np.concatenate(spikes_per_trial) if spikes_per_trial else np.array([])
+            if len(flat):
+                ax.eventplot([flat], lineoffsets=[0], colors=["black"],
+                             linelengths=0.8, linewidths=0.5, alpha=0.1)
 
         ax.axvline(0, color="red", linewidth=1.0, linestyle="--",
                    label=f"{EVENT_STYLE[event]['label']} (align)")
@@ -161,8 +170,9 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
             ax.axvline(t_rel_ms, linewidth=0.8, **EVENT_STYLE[name])
 
         ax.set_xlim(-pre_ms, post_ms)
+        ax.set_ylim(-0.6, 0.6)
+        ax.set_yticks([])
         ax.set_xlabel("Time rel. to event (ms)", fontsize=7)
-        ax.set_ylabel("Trial", fontsize=7)
         ax.set_title(label, fontsize=7)
         ax.tick_params(labelsize=6)
 
