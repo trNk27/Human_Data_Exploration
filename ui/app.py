@@ -200,7 +200,7 @@ if run:
         raise
 
 if st.session_state.fig_bytes:
-    st.image(st.session_state.fig_bytes, use_container_width=True)
+    st.image(st.session_state.fig_bytes, use_column_width=True)
     st.download_button(
         "⬇ Download PNG",
         data=st.session_state.fig_bytes,
