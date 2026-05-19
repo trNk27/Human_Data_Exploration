@@ -9,7 +9,7 @@ import scipy.io
 import numpy as np
 import pandas as pd
 
-SESSION  = "20250521"
+SESSION  = "20250602"
 DATA_DIR = os.path.join(os.path.dirname(__file__), SESSION)
 
 MAX_NEURONS = 90  # hard cap shared by psth and autocorrelogram
@@ -90,4 +90,4 @@ def maybe_save(fig, args, prefix="plot"):
         return
     path = args.save if args.save else f"{prefix}_{SESSION}.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
-    print(f"Saved → {path}")
+    print(f"Saved -> {path}")

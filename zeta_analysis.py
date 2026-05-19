@@ -8,12 +8,25 @@ Usage:
     python zeta_analysis.py
     python zeta_analysis.py --event reward --top 10 --save
     python zeta_analysis.py --event all --dur 2.0 --alpha 0.05
+    python zeta_analysis.py --jobs 4          # limit parallel worker processes
+
+Neurons are tested in parallel across CPU cores by default (--jobs 1 forces
+serial). The CLI must therefore be run as a script, not imported.
 
 Requires: pip install zetapy
 """
 
 import argparse
 import os
+
+# Keep each worker process single-threaded for BLAS so the neuron-level
+# process pool below does not oversubscribe the CPU. Must precede `import numpy`.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -48,55 +61,80 @@ def get_event_times(event_name, trials, sr):
     return times[responding]
 
 
-def run_zeta_all_neurons(trains, labels, event_times, dur_s=DEFAULT_DUR_S, n_resamp=DEFAULT_RESAMP):
-    """Run zetatest for every neuron. Returns a results DataFrame and a list of rate dicts."""
-    rows      = []
-    rate_data = []   # dRate dict per neuron (or None on skip)
-
-    n_total = len(trains)
-    for i, (spikes, label) in enumerate(zip(trains, labels)):
-        print(f"  [{i+1}/{n_total}] {label}", flush=True)
-        if len(spikes) < 10:
-            rows.append(_empty_row(i, label))
-            rate_data.append(None)
-            continue
-
-        try:
-            dblP, dZETA, dRate = zetatest(
-                spikes, event_times,
-                dblUseMaxDur=dur_s,
-                intResampNum=n_resamp,
-                boolReturnRate=True,
-                boolParallel=False,
-                boolPlot=False,
-            )
-        except Exception as exc:
-            print(f"  [skip] neuron {i}: {exc}")
-            rows.append(_empty_row(i, label))
-            rate_data.append(None)
-            continue
-
-        rows.append({
-            "neuron_idx":  i,
-            "label":       label,
-            "p_zeta":      dblP,
-            "zeta":        dZETA["dblZETA"],
-            "mean_z":      dZETA["dblMeanZ"],
-            "p_mean":      dZETA["dblMeanP"],
-            "latency_s":   dZETA["dblLatencyZETA"],
-            "peak_onset_s": dRate.get("dblLatencyPeakOnset", np.nan),
-        })
-        rate_data.append(dRate)
-
-    df = pd.DataFrame(rows).sort_values("p_zeta").reset_index(drop=True)
-    return df, rate_data
-
-
 def _empty_row(i, label):
     return {"neuron_idx": i, "label": label,
             "p_zeta": 1.0, "zeta": np.nan,
             "mean_z": np.nan, "p_mean": 1.0,
             "latency_s": np.nan, "peak_onset_s": np.nan}
+
+
+def _zeta_one(task):
+    """Run zetatest for one neuron. Top-level so it is picklable for the process pool.
+
+    Returns (neuron_idx, result_row, dRate-or-None).
+    """
+    i, spikes, label, event_times, dur_s, n_resamp = task
+    if len(spikes) < 10:
+        return i, _empty_row(i, label), None
+
+    try:
+        dblP, dZETA, dRate = zetatest(
+            spikes, event_times,
+            dblUseMaxDur=dur_s,
+            intResampNum=n_resamp,
+            boolReturnRate=True,
+            boolParallel=False,
+            boolPlot=False,
+        )
+    except Exception as exc:
+        print(f"  [skip] neuron {i}: {exc}", flush=True)
+        return i, _empty_row(i, label), None
+
+    return i, {
+        "neuron_idx":  i,
+        "label":       label,
+        "p_zeta":      dblP,
+        "zeta":        dZETA["dblZETA"],
+        "mean_z":      dZETA["dblMeanZ"],
+        "p_mean":      dZETA["dblMeanP"],
+        "latency_s":   dZETA["dblLatencyZETA"],
+        "peak_onset_s": dRate.get("dblLatencyPeakOnset", np.nan),
+    }, dRate
+
+
+def run_zeta_all_neurons(trains, labels, event_times, dur_s=DEFAULT_DUR_S,
+                         n_resamp=DEFAULT_RESAMP, n_jobs=None):
+    """Run zetatest for every neuron across n_jobs worker processes.
+
+    n_jobs=1 runs serially; None uses every CPU core. Returns a results
+    DataFrame sorted by p-value and a list of rate dicts indexed by
+    neuron_idx (None where a neuron was skipped).
+    """
+    n_total = len(trains)
+    tasks   = [(i, spikes, label, event_times, dur_s, n_resamp)
+               for i, (spikes, label) in enumerate(zip(trains, labels))]
+
+    rows_by_idx = {}
+    rate_by_idx = {}
+
+    def _record(done, i, row, dRate):
+        print(f"  [{done}/{n_total}] {row['label']}", flush=True)
+        rows_by_idx[i] = row
+        rate_by_idx[i] = dRate
+
+    if n_jobs == 1:
+        for done, task in enumerate(tasks, start=1):
+            _record(done, *_zeta_one(task))
+    else:
+        with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+            futures = [pool.submit(_zeta_one, task) for task in tasks]
+            for done, fut in enumerate(as_completed(futures), start=1):
+                _record(done, *fut.result())
+
+    rows      = [rows_by_idx[i] for i in range(n_total)]
+    rate_data = [rate_by_idx[i] for i in range(n_total)]
+    df = pd.DataFrame(rows).sort_values("p_zeta").reset_index(drop=True)
+    return df, rate_data
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +145,7 @@ def plot_ifr_grid(results_df, rate_data_list, alpha, top_n, event_name, args):
     """Plot IFR for the top_n significant neurons (rate data already in zetatest output)."""
     sig = results_df[results_df["p_zeta"] < alpha].head(top_n)
     if sig.empty:
-        print(f"  No significant neurons (α={alpha}) for event '{event_name}'.")
+        print(f"  No significant neurons (alpha={alpha}) for event '{event_name}'.")
         return
 
     ncols = min(4, len(sig))
@@ -190,6 +228,8 @@ def parse_args():
                    help="Top N significant neurons to plot (default: 8).")
     p.add_argument("--csv",    action="store_true",
                    help="Write the full results table per event to results/.")
+    p.add_argument("--jobs",   type=int,   default=None,
+                   help="Parallel worker processes (default: all CPU cores; 1 = serial).")
     add_save_arg(p)
     return p.parse_args()
 
@@ -202,6 +242,7 @@ def main():
     trials = load_trials_sync()
     sr     = load_sr()["SamplingRate_Hz"].iloc[0]
     print(f"Loaded {len(trains)} neurons, {len(trials)} trials, SR={sr} Hz")
+    print(f"Workers: {args.jobs or os.cpu_count()} process(es)")
 
     events_to_run = list(EVENTS.keys()) if args.event == "all" else [args.event]
     all_results   = {}
@@ -212,12 +253,12 @@ def main():
 
         results, rate_data = run_zeta_all_neurons(
             trains, labels, event_times,
-            dur_s=args.dur, n_resamp=args.resamp,
+            dur_s=args.dur, n_resamp=args.resamp, n_jobs=args.jobs,
         )
         all_results[event_name] = results
 
         n_sig = int((results["p_zeta"] < args.alpha).sum())
-        print(f"Significant (α={args.alpha}): {n_sig} / {len(results)} neurons")
+        print(f"Significant (alpha={args.alpha}): {n_sig} / {len(results)} neurons")
         print(results[["label", "zeta", "p_zeta", "latency_s", "peak_onset_s"]].head(10).to_string(index=False))
 
         if args.csv:
@@ -225,7 +266,7 @@ def main():
             os.makedirs(out_dir, exist_ok=True)
             csv_path = os.path.join(out_dir, f"zeta_{event_name}_{SESSION}.csv")
             results.to_csv(csv_path, index=False)
-            print(f"Saved → {csv_path}")
+            print(f"Saved -> {csv_path}")
 
         plot_ifr_grid(results, rate_data,
                       alpha=args.alpha, top_n=args.top,
