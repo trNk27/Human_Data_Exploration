@@ -10,7 +10,8 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import SESSION, get_spike_trains, load_trials_sync, load_sr, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
+import utils
+from utils import get_spike_trains, load_trials_sync, load_sr, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
 from psth import EVENTS, EVENT_STYLE, CONDITIONS
 
 
@@ -50,7 +51,7 @@ def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):
     ax.set_ylim(-0.5, len(trains) - 0.5)
     if t_start is not None or t_end is not None:
         ax.set_xlim(t_start, t_end)
-    ax.set_title(f"Spike raster — session {SESSION}  ({len(trains)} units)")
+    ax.set_title(f"Spike raster — session {utils.SESSION}  ({len(trains)} units)")
 
     fig.tight_layout()
     return fig, ax
@@ -183,7 +184,7 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
 
     cond_str = "  |  coloured by (arm × reward)" if by_condition else ""
     fig.suptitle(
-        f"Aligned raster — session {SESSION}  |  aligned to: {event}{cond_str}"
+        f"Aligned raster — session {utils.SESSION}  |  aligned to: {event}{cond_str}"
         f"  (pre={pre_ms} ms, post={post_ms} ms)",
         fontsize=9,
     )

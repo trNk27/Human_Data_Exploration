@@ -8,7 +8,8 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import SESSION, get_spike_trains, MAX_NEURONS, add_save_arg, maybe_save
+import utils
+from utils import get_spike_trains, MAX_NEURONS, add_save_arg, maybe_save
 
 
 def compute_acg(spike_times, lag_ms=200, bin_ms=1):
@@ -89,7 +90,7 @@ def plot_acg(neuron_indices=None, area=None, lag_ms=200, bin_ms=1):
     for idx in range(n, nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
-    fig.suptitle(f"Autocorrelograms — session {SESSION}  (lag ±{lag_ms} ms, bin {bin_ms} ms)",
+    fig.suptitle(f"Autocorrelograms — session {utils.SESSION}  (lag ±{lag_ms} ms, bin {bin_ms} ms)",
                  fontsize=9)
     fig.tight_layout()
     return fig, axes

@@ -19,7 +19,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
-from utils import SESSION, load_trials_sync, load_sr, get_spike_trains, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
+import utils
+from utils import load_trials_sync, load_sr, get_spike_trains, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
 
 # Sampling-point columns in Trials_Sync that need dividing by SR.
 EVENTS = {
@@ -204,7 +205,7 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
     smooth_str = f", smoothed σ={sigma_ms:.0f} ms" if sigma_ms is not None else ""
     cond_str   = "  |  split by (arm, reward)" if by_condition else ""
     fig.suptitle(
-        f"PSTH — session {SESSION}  |  aligned to: {event}{cond_str}"
+        f"PSTH — session {utils.SESSION}  |  aligned to: {event}{cond_str}"
         f"  (pre={pre_ms}ms, post={post_ms}ms, bin={bin_ms}ms{smooth_str})",
         fontsize=9,
     )
