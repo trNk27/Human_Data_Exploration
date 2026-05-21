@@ -4,58 +4,28 @@ Aligns each neuron's spike train to a behavioural event, bins spikes across
 trials, and plots firing rate in Hz. Vertical lines mark the mean timing of
 other key events relative to the alignment point.
 
-Alignment events:
-  cue       — cue presentation (CuePresent_sp)
-  response  — response-window start (RespWindowStart_sp)
-  reward    — reward onset (RewardOnset_sp)
-  start     — trial start (TrialStart_sp)
-
-All time parameters (bin sizes, windows) are in milliseconds.
-Internal spike/event times remain in seconds as stored in the data.
+All time parameters (bin sizes, windows) are in milliseconds. Internal spike
+and event times remain in seconds, as stored in the data.
 """
 
 import math
+import argparse
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
-import utils
-from utils import load_trials_sync, load_sr, get_spike_trains, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
-
-# Sampling-point columns in Trials_Sync that need dividing by SR.
-EVENTS = {
-    "cue":      "CuePresent_sp",
-    "response": "RespWindowStart_sp",
-    "reward":   "RewardOnset_sp",
-    "start":    "TrialStart_sp",
-}
-
-EVENT_STYLE = {
-    "cue":      dict(color="royalblue", linestyle="--", label="Cue"),
-    "response": dict(color="green",     linestyle=":",  label="Resp. window"),
-    "reward":   dict(color="darkorange",linestyle="-.", label="Reward"),
-    "start":    dict(color="gray",      linestyle="--", label="Trial start"),
-}
-
-# Trial split: (ChosenArm_G1S0, Rewarded). NaN/non-responding trials are
-# naturally excluded by the integer equality checks.
-CONDITIONS = {
-    "gamble_reward":   dict(arm=1, rewarded=1, color="darkorange", label="Gamble + Rew"),
-    "gamble_noreward": dict(arm=1, rewarded=0, color="firebrick",  label="Gamble + No"),
-    "safe_reward":     dict(arm=0, rewarded=1, color="seagreen",   label="Safe + Rew"),
-    #"safe_noreward":   dict(arm=0, rewarded=0, color="steelblue",  label="Safe + No"),
-}
+from utils import (
+    EVENTS, EVENT_STYLE, CONDITIONS,
+    get_spike_trains, load_trials_sync, load_sr,
+    event_times as event_times_for, condition_masks,
+    select_neurons, add_session_arg, add_selection_args,
+    add_save_arg, maybe_save, handle_list, session_data_dir,
+)
 
 
 def compute_psth(spike_times, event_times_s, pre_ms, post_ms, bin_ms):
-    """Return (bin_centres_ms, firing_rate_hz) for spikes aligned to events.
-
-    spike_times   : 1-D array of spike times in seconds
-    event_times_s : 1-D array of event times in seconds, one per trial
-    pre_ms        : ms before each event
-    post_ms       : ms after each event
-    bin_ms        : histogram bin width in ms
-    """
+    """Return (bin_centres_ms, firing_rate_hz) for spikes aligned to events."""
     bin_s  = bin_ms  / 1000
     pre_s  = pre_ms  / 1000
     post_s = post_ms / 1000
@@ -74,75 +44,38 @@ def compute_psth(spike_times, event_times_s, pre_ms, post_ms, bin_ms):
 
     centres_s = 0.5 * (edges[:-1] + edges[1:])
     rate = counts / (n_valid * bin_s) if n_valid > 0 else counts
-    return centres_s * 1000, rate  # centres in ms
+    return centres_s * 1000, rate
 
 
 def plot_psth(neuron_indices=None, area=None, event="cue",
               pre_ms=500, post_ms=1000, bin_ms=50, sigma_ms=None,
-              by_condition=False):
-    """Plot one PSTH subplot per neuron.
-
-    Parameters
-    ----------
-    neuron_indices : list[int], optional  — restrict to these neuron indices
-    area           : str, optional        — case-insensitive label substring filter
-    event          : str                  — alignment event key (see EVENTS)
-    pre_ms         : float                — ms before event
-    post_ms        : float                — ms after event
-    bin_ms         : float                — histogram bin width in ms
-    sigma_ms       : float, optional      — Gaussian smoothing kernel SD in ms;
-                                            None disables smoothing overlay
-    by_condition   : bool                 — split trials into the four
-                                            (arm, reward) conditions and
-                                            overlay one curve per condition
-    """
+              by_condition=False, data_dir=None, session=None):
+    """Plot one PSTH subplot per neuron, optionally split by (arm, reward) condition."""
     if event not in EVENTS:
         raise ValueError(f"event must be one of {list(EVENTS)}")
 
-    trains, labels = get_spike_trains()
+    trains, labels = get_spike_trains(data_dir=data_dir)
+    trains, labels = select_neurons(trains, labels, indices=neuron_indices, area=area)
 
-    if neuron_indices is not None:
-        trains = [trains[i] for i in neuron_indices]
-        labels = [labels[i] for i in neuron_indices]
+    trials = load_trials_sync(data_dir=data_dir)
+    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
 
-    if area is not None:
-        mask   = [area.lower() in lbl.lower() for lbl in labels]
-        trains = [t for t, m in zip(trains, mask) if m]
-        labels = [l for l, m in zip(labels, mask) if m]
-
-    if not trains:
-        raise ValueError("No neurons match the given selection.")
-
-    if len(trains) > MAX_NEURONS:
-        raise ValueError(
-            f"{len(trains)} neurons selected — limit is {MAX_NEURONS}. "
-            "Use --neurons or --area to narrow the selection."
-        )
-
-    trials = load_trials_sync()
-    sr     = load_sr()["SamplingRate_Hz"].iloc[0]
-
-    align_times = sp_to_s(trials, sr, EVENTS[event])
+    align_times = event_times_for(trials, sr, event)
     responding  = trials["NotResponding"].to_numpy() != 1
     align_times = np.where(responding, align_times, np.nan)
 
-    cond_masks = None
+    cond_masks  = None
     cond_counts = None
     if by_condition:
-        arm_col = trials["ChosenArm_G1S0"].to_numpy()
-        rew_col = trials["Rewarded"].to_numpy()
-        cond_masks = {
-            name: (arm_col == c["arm"]) & (rew_col == c["rewarded"])
-            for name, c in CONDITIONS.items()
-        }
+        cond_masks  = condition_masks(trials)
         cond_counts = {name: int(np.sum(m)) for name, m in cond_masks.items()}
 
     # Mean timing of other events relative to the alignment point (in ms).
     markers = {}
-    for name, col in EVENTS.items():
+    for name in EVENTS:
         if name == event:
             continue
-        rel = sp_to_s(trials, sr, col) - align_times
+        rel = event_times_for(trials, sr, name) - align_times
         if not np.any(np.isfinite(rel)):
             continue
         mean_rel_ms = float(np.nanmean(rel)) * 1000
@@ -166,8 +99,7 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
                     continue
                 centres, rate = compute_psth(train, cond_align, pre_ms, post_ms, bin_ms)
                 if sigma_ms is not None:
-                    sigma_bins = sigma_ms / bin_ms
-                    rate = gaussian_filter1d(rate, sigma=sigma_bins)
+                    rate = gaussian_filter1d(rate, sigma=sigma_ms / bin_ms)
                     ax.plot(centres, rate, color=cfg["color"], linewidth=1.2,
                             label=f"{cfg['label']} (n={cond_counts[name]})")
                 else:
@@ -176,21 +108,17 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
                             label=f"{cfg['label']} (n={cond_counts[name]})")
         else:
             centres, rate = compute_psth(train, align_times, pre_ms, post_ms, bin_ms)
-
             ax.bar(centres, rate, width=bin_ms, color="steelblue",
                    edgecolor="none", alpha=0.6, label="_nolegend_")
-
             if sigma_ms is not None:
-                sigma_bins = sigma_ms / bin_ms
-                smoothed = gaussian_filter1d(rate, sigma=sigma_bins)
+                smoothed = gaussian_filter1d(rate, sigma=sigma_ms / bin_ms)
                 ax.plot(centres, smoothed, color="navy", linewidth=1.2, label="_nolegend_")
 
         ax.axvline(0, color="red", linewidth=1.0, linestyle="--",
-                   label=f"{EVENT_STYLE[event]['label']} (align)")
-
+                   label=f"{EVENTS[event]['label']} (align)")
         for name, t_rel_ms in markers.items():
-            style = EVENT_STYLE[name]
-            ax.axvline(t_rel_ms, linewidth=0.8, **style)
+            ax.axvline(t_rel_ms, linewidth=0.8,
+                       label=EVENTS[name]["label"], **EVENT_STYLE[name])
 
         ax.set_title(label, fontsize=7)
         ax.set_xlabel("Time rel. to event (ms)", fontsize=7)
@@ -202,10 +130,10 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
     for idx in range(n, nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
-    smooth_str = f", smoothed σ={sigma_ms:.0f} ms" if sigma_ms is not None else ""
+    smooth_str = f", smoothed sigma={sigma_ms:.0f} ms" if sigma_ms is not None else ""
     cond_str   = "  |  split by (arm, reward)" if by_condition else ""
     fig.suptitle(
-        f"PSTH — session {utils.SESSION}  |  aligned to: {event}{cond_str}"
+        f"PSTH — session {session}  |  aligned to: {event}{cond_str}"
         f"  (pre={pre_ms}ms, post={post_ms}ms, bin={bin_ms}ms{smooth_str})",
         fontsize=9,
     )
@@ -214,46 +142,30 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="Peristimulus time histogram (PSTH)")
-    parser.add_argument("--event",   type=str,   default="cue",
-                        choices=list(EVENTS),
+    add_session_arg(parser)
+    add_selection_args(parser)
+    parser.add_argument("--event", type=str, default="cue", choices=list(EVENTS),
                         help="Behavioural event to align to (default: cue)")
-    parser.add_argument("--pre",     type=float, default=500,
-                        help="ms before event (default: 500)")
-    parser.add_argument("--post",    type=float, default=1000,
-                        help="ms after event (default: 1000)")
-    parser.add_argument("--bin",     type=float, default=50,
-                        help="Bin width in ms (default: 50)")
-    parser.add_argument("--sigma",   type=float, default=None,
-                        help="Gaussian smoothing SD in ms (default: off)")
-    parser.add_argument("--neurons", nargs="+",  type=int, default=None,
-                        help="Neuron indices to show, e.g. --neurons 0 1 5")
-    parser.add_argument("--area",    type=str,   default=None,
-                        help="Show only neurons whose label contains this string")
-    parser.add_argument("--list",    action="store_true",
-                        help="Print all neuron indices and labels, then exit")
-    add_save_arg(parser)
+    parser.add_argument("--pre",   type=float, default=500,  help="ms before event (default: 500)")
+    parser.add_argument("--post",  type=float, default=1000, help="ms after event (default: 1000)")
+    parser.add_argument("--bin",   type=float, default=50,   help="Bin width in ms (default: 50)")
+    parser.add_argument("--sigma", type=float, default=None, help="Gaussian smoothing SD in ms (default: off)")
     parser.add_argument("--by-condition", action="store_true",
-                        help="Overlay one curve per (arm, reward) condition: "
-                             "gamble/safe x rewarded/not")
+                        help="Overlay one curve per (arm, reward) condition")
+    add_save_arg(parser)
     args = parser.parse_args()
 
-    if args.list:
-        _, labels = get_spike_trains()
-        for i, lbl in enumerate(labels):
-            print(f"{i:4d}  {lbl}")
-    else:
-        fig, _ = plot_psth(
-            neuron_indices=args.neurons,
-            area=args.area,
-            event=args.event,
-            pre_ms=args.pre,
-            post_ms=args.post,
-            bin_ms=args.bin,
-            sigma_ms=args.sigma,
-            by_condition=args.by_condition,
-        )
-        maybe_save(fig, args, prefix="psth")
-        plt.show()
+    data_dir = session_data_dir(args.session)
+    if handle_list(args, data_dir=data_dir):
+        raise SystemExit
+
+    fig, _ = plot_psth(
+        neuron_indices=args.neurons, area=args.area,
+        event=args.event, pre_ms=args.pre, post_ms=args.post,
+        bin_ms=args.bin, sigma_ms=args.sigma,
+        by_condition=args.by_condition,
+        data_dir=data_dir, session=args.session,
+    )
+    maybe_save(fig, args, prefix="psth")
+    plt.show()

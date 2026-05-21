@@ -5,19 +5,19 @@ Two analyses are available:
   responsiveness  zeta_analysis.py — one-sample ZETA, tests whether each
                   neuron responds to each behavioural event (cue, response,
                   reward, trial_start).
-                  Output: zeta_<event>_<session>.{csv,png}
+                  Output: results/zeta_responsiveness/zeta_<event>_<session>.{csv,png}
 
   outcome         zeta_outcome.py  — two-sample ZETA, tests whether each
                   neuron's reward-aligned response differs between trial
                   outcomes (G+R vs G+N, G+R vs S+R).
-                  Output: zeta2_<contrast>_<session>.{csv,png}
+                  Output: results/zeta_outcome/zeta2_<contrast>_<session>.{csv,png}
 
 For each session it writes the full results tables (CSV) and the top-8
-significant-neuron plots (PNG) to results/.
+significant-neuron plots (PNG) to the appropriate results/ subfolder.
 
-Mirrors the session-sweep approach of batch_export_acg.py: it temporarily
-rewrites SESSION in utils.py per session and restores it afterwards. Both
-scripts test neurons in parallel across all CPU cores; pass --jobs to cap it.
+This wrapper just discovers sessions and invokes the underlying scripts with
+`--session <id>` — it does NOT touch utils.py. Both scripts test neurons in
+parallel across all CPU cores; pass --jobs to cap it.
 
 Usage:
     python batch_zeta.py                          # both analyses, all sessions
@@ -34,10 +34,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-HERE       = Path(__file__).parent
-UTILS      = HERE / "utils.py"
-RESULTS    = HERE / "results"
-SESSION_RE = re.compile(r'^(SESSION\s*=\s*")[^"]*(")', re.MULTILINE)
+from utils import REPO_ROOT, RESULTS_DIR
+
+HERE = Path(REPO_ROOT)
 
 # Each analysis: the script to run and its fixed arguments. --csv + --save
 # (no path) make each script auto-name its CSV/PNG per event/contrast and
@@ -52,10 +51,6 @@ ANALYSES = {
         "args":   ["--contrast", "all", "--csv", "--save", "--top", "8"],
     },
 }
-
-
-def set_session(text: str, session: str) -> str:
-    return SESSION_RE.sub(rf'\g<1>{session}\g<2>', text)
 
 
 def discover_sessions():
@@ -99,39 +94,32 @@ def main():
     if args.jobs is not None:
         extra += ["--jobs", str(args.jobs)]
 
-    RESULTS.mkdir(exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
     print(f"Sessions: {sessions}")
     print(f"Analyses: {selected}\n")
 
     # Headless backend so plt.show() in the ZETA scripts never blocks the batch.
     env = dict(os.environ, MPLBACKEND="Agg")
 
-    original = UTILS.read_text(encoding="utf-8")
-    failed   = []
-    try:
-        for session in sessions:
-            print(f"=== {session} ===", flush=True)
-            UTILS.write_text(set_session(original, session), encoding="utf-8")
-            for name in selected:
-                cfg = ANALYSES[name]
-                print(f"  -- {name}: {cfg['script']} --", flush=True)
-                # cwd=results/ so the auto-named PNGs land there beside the CSVs.
-                result = subprocess.run(
-                    [sys.executable, str(HERE / cfg["script"]), *cfg["args"], *extra],
-                    cwd=str(RESULTS),
-                    env=env,
-                )
-                if result.returncode != 0:
-                    print(f"  WARNING: {cfg['script']} exited with code "
-                          f"{result.returncode} for {session}")
-                    failed.append(f"{session}/{name}")
-            print()
-    finally:
-        UTILS.write_text(original, encoding="utf-8")
-        print("utils.py restored.")
+    failed = []
+    for session in sessions:
+        print(f"=== {session} ===", flush=True)
+        for name in selected:
+            cfg = ANALYSES[name]
+            print(f"  -- {name}: {cfg['script']} --", flush=True)
+            result = subprocess.run(
+                [sys.executable, str(HERE / cfg["script"]),
+                 "--session", session, *cfg["args"], *extra],
+                env=env,
+            )
+            if result.returncode != 0:
+                print(f"  WARNING: {cfg['script']} exited with code "
+                      f"{result.returncode} for {session}")
+                failed.append(f"{session}/{name}")
+        print()
 
     n_runs = len(sessions) * len(selected)
-    print(f"\nDone: {n_runs - len(failed)}/{n_runs} runs -> CSVs and plots in {RESULTS}")
+    print(f"\nDone: {n_runs - len(failed)}/{n_runs} runs -> CSVs and plots in {RESULTS_DIR}")
     if failed:
         print(f"Failed runs: {failed}")
 

@@ -6,12 +6,20 @@ Navigate with Prev / Next buttons, arrow keys, or type a neuron index directly.
 All time parameters are in milliseconds.
 """
 
+import argparse
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, TextBox
 
-from utils import SESSION, get_spike_trains, load_trials_sync, load_sr, sp_to_s
-from psth import EVENTS, EVENT_STYLE, compute_psth
+from utils import (
+    EVENTS, EVENT_STYLE,
+    get_spike_trains, load_trials_sync, load_sr,
+    event_times as event_times_for,
+    select_neurons, add_session_arg, add_selection_args,
+    session_data_dir,
+)
+from psth import compute_psth
 from autocorrelogram import compute_acg
 
 # Defaults — override via CLI
@@ -24,30 +32,23 @@ _BIN_ACG_MS = 1
 
 def build_browser(neuron_indices=None, area=None, event="cue",
                   pre_ms=_PRE_MS, post_ms=_POST_MS, bin_ms=_BIN_MS,
-                  lag_ms=_LAG_MS, bin_acg_ms=_BIN_ACG_MS):
-    trains, labels = get_spike_trains()
+                  lag_ms=_LAG_MS, bin_acg_ms=_BIN_ACG_MS,
+                  data_dir=None, session=None):
+    trains, labels = get_spike_trains(data_dir=data_dir)
+    trains, labels = select_neurons(trains, labels,
+                                    indices=neuron_indices, area=area,
+                                    enforce_cap=False)
 
-    if neuron_indices is not None:
-        trains = [trains[i] for i in neuron_indices]
-        labels = [labels[i] for i in neuron_indices]
-    if area is not None:
-        mask   = [area.lower() in lbl.lower() for lbl in labels]
-        trains = [t for t, m in zip(trains, mask) if m]
-        labels = [l for l, m in zip(labels, mask) if m]
-
-    if not trains:
-        raise ValueError("No neurons match the given selection.")
-
-    trials      = load_trials_sync()
-    sr          = load_sr()["SamplingRate_Hz"].iloc[0]
-    align_times = sp_to_s(trials, sr, EVENTS[event])
+    trials      = load_trials_sync(data_dir=data_dir)
+    sr          = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
+    align_times = event_times_for(trials, sr, event)
 
     # Mean relative timing of other events in ms for PSTH marker lines.
     markers = {}
-    for name, col in EVENTS.items():
+    for name in EVENTS:
         if name == event:
             continue
-        rel = sp_to_s(trials, sr, col) - align_times
+        rel = event_times_for(trials, sr, name) - align_times
         if np.any(np.isfinite(rel)):
             mean_rel_ms = float(np.nanmean(rel)) * 1000
             if -pre_ms <= mean_rel_ms <= post_ms:
@@ -75,30 +76,29 @@ def build_browser(neuron_indices=None, area=None, event="cue",
 
         train = trains[idx]
 
-        # PSTH — centres and marker positions are in ms
         centres, rate = compute_psth(train, align_times, pre_ms, post_ms, bin_ms)
         ax_psth.bar(centres, rate, width=bin_ms, color="steelblue", edgecolor="none", alpha=0.6)
         ax_psth.axvline(0, color="red", linewidth=1.0, linestyle="--",
-                        label=f"{EVENT_STYLE[event]['label']} (align)")
+                        label=f"{EVENTS[event]['label']} (align)")
         for name, t_rel_ms in markers.items():
-            ax_psth.axvline(t_rel_ms, linewidth=0.8, **EVENT_STYLE[name])
+            ax_psth.axvline(t_rel_ms, linewidth=0.8,
+                            label=EVENTS[name]["label"], **EVENT_STYLE[name])
         ax_psth.set_xlabel("Time rel. to event (ms)", fontsize=8)
         ax_psth.set_ylabel("Firing rate (Hz)", fontsize=8)
         ax_psth.set_title(f"PSTH — aligned to: {event}", fontsize=8)
         ax_psth.legend(fontsize=6, loc="upper right")
         ax_psth.tick_params(labelsize=7)
 
-        # ACG
         c_acg, cnt = compute_acg(train, lag_ms=lag_ms, bin_ms=bin_acg_ms)
         ax_acg.bar(c_acg, cnt, width=bin_acg_ms, color="steelblue", edgecolor="none")
         ax_acg.axvline(0, color="red", linewidth=0.8, linestyle="--")
         ax_acg.set_xlabel("Lag (ms)", fontsize=8)
         ax_acg.set_ylabel("Count", fontsize=8)
-        ax_acg.set_title(f"Autocorrelogram (±{lag_ms} ms, bin {bin_acg_ms} ms)", fontsize=8)
+        ax_acg.set_title(f"Autocorrelogram (+/-{lag_ms} ms, bin {bin_acg_ms} ms)", fontsize=8)
         ax_acg.tick_params(labelsize=7)
 
         fig.suptitle(
-            f"[{idx} / {len(trains) - 1}]  {labels[idx]}\nSession {SESSION}",
+            f"[{idx} / {len(trains) - 1}]  {labels[idx]}\nSession {session}",
             fontsize=9, y=0.97,
         )
         txt_box.set_val(str(idx))
@@ -127,17 +127,16 @@ def build_browser(neuron_indices=None, area=None, event="cue",
     txt_box.on_submit(on_submit)
     fig.canvas.mpl_connect("key_press_event", on_key)
 
-    # Keep widget references alive — without this, GC drops buttons and kills callbacks.
     fig._widgets = [btn_prev, btn_next, txt_box]
-
     draw(0)
     return fig
 
 
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser(description="Interactive neuron browser")
-    parser.add_argument("--event",   type=str,   default="cue", choices=list(EVENTS),
+    add_session_arg(parser)
+    add_selection_args(parser)
+    parser.add_argument("--event",   type=str, default="cue", choices=list(EVENTS),
                         help="PSTH alignment event (default: cue)")
     parser.add_argument("--pre",     type=float, default=_PRE_MS,
                         help=f"ms before event (default: {_PRE_MS})")
@@ -149,20 +148,15 @@ if __name__ == "__main__":
                         help=f"ACG bin width in ms (default: {_BIN_ACG_MS})")
     parser.add_argument("--lag",     type=float, default=_LAG_MS,
                         help=f"ACG max lag in ms (default: {_LAG_MS})")
-    parser.add_argument("--neurons", nargs="+",  type=int, default=None,
-                        help="Restrict to these neuron indices")
-    parser.add_argument("--area",    type=str,   default=None,
-                        help="Filter by area label substring")
     args = parser.parse_args()
 
+    data_dir = session_data_dir(args.session)
+
     build_browser(
-        neuron_indices=args.neurons,
-        area=args.area,
+        neuron_indices=args.neurons, area=args.area,
         event=args.event,
-        pre_ms=args.pre,
-        post_ms=args.post,
-        bin_ms=args.bin,
-        lag_ms=args.lag,
-        bin_acg_ms=args.bin_acg,
+        pre_ms=args.pre, post_ms=args.post, bin_ms=args.bin,
+        lag_ms=args.lag, bin_acg_ms=args.bin_acg,
+        data_dir=data_dir, session=args.session,
     )
     plt.show()

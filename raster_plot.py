@@ -7,32 +7,32 @@ Two modes:
 """
 
 import math
+import argparse
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-import utils
-from utils import get_spike_trains, load_trials_sync, load_sr, sp_to_s, MAX_NEURONS, add_save_arg, maybe_save
-from psth import EVENTS, EVENT_STYLE, CONDITIONS
+from utils import (
+    EVENTS, EVENT_STYLE, CONDITIONS,
+    get_spike_trains, load_trials_sync, load_sr,
+    event_times as event_times_for, condition_masks,
+    select_neurons, add_session_arg, add_selection_args,
+    add_save_arg, maybe_save, handle_list, session_data_dir,
+)
 
 
 # ---------------------------------------------------------------------------
 # Full-recording raster
 # ---------------------------------------------------------------------------
 
-def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):
-    trains, labels = get_spike_trains()
-
-    if neuron_indices is not None:
-        trains = [trains[i] for i in neuron_indices]
-        labels = [labels[i] for i in neuron_indices]
-
-    if area is not None:
-        mask = [area.lower() in lbl.lower() for lbl in labels]
-        trains = [t for t, m in zip(trains, mask) if m]
-        labels = [l for l, m in zip(labels, mask) if m]
-
-    if not trains:
-        raise ValueError("No neurons match the given selection.")
+def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None,
+                data_dir=None, session=None):
+    trains, labels = get_spike_trains(data_dir=data_dir)
+    # Full-recording raster doesn't make per-neuron subplots, so the MAX_NEURONS
+    # cap doesn't apply.
+    trains, labels = select_neurons(trains, labels,
+                                    indices=neuron_indices, area=area,
+                                    enforce_cap=False)
 
     if t_start is not None or t_end is not None:
         lo = -np.inf if t_start is None else t_start
@@ -51,7 +51,7 @@ def plot_raster(t_start=None, t_end=None, neuron_indices=None, area=None):
     ax.set_ylim(-0.5, len(trains) - 0.5)
     if t_start is not None or t_end is not None:
         ax.set_xlim(t_start, t_end)
-    ax.set_title(f"Spike raster — session {utils.SESSION}  ({len(trains)} units)")
+    ax.set_title(f"Spike raster — session {session}  ({len(trains)} units)")
 
     fig.tight_layout()
     return fig, ax
@@ -79,65 +79,37 @@ def compute_aligned_raster(spike_times, event_times_s, pre_ms, post_ms):
 
 
 def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
-                        pre_ms=500, post_ms=1000, by_condition=False):
-    """Plot a trial-by-trial raster aligned to a behavioural event.
-
-    One subplot per neuron. Each row is a trial; tick marks are the spike
-    times relative to the alignment event. Vertical lines show the mean
-    timing of other key events. With by_condition=True, tick colours
-    distinguish the (arm × reward) conditions defined in psth.CONDITIONS.
-    """
+                        pre_ms=500, post_ms=1000, by_condition=False,
+                        data_dir=None, session=None):
+    """Plot a trial-by-trial raster aligned to a behavioural event."""
     if event not in EVENTS:
         raise ValueError(f"event must be one of {list(EVENTS)}")
 
-    trains, labels = get_spike_trains()
+    trains, labels = get_spike_trains(data_dir=data_dir)
+    trains, labels = select_neurons(trains, labels, indices=neuron_indices, area=area)
 
-    if neuron_indices is not None:
-        trains = [trains[i] for i in neuron_indices]
-        labels = [labels[i] for i in neuron_indices]
+    trials = load_trials_sync(data_dir=data_dir)
+    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
 
-    if area is not None:
-        mask   = [area.lower() in lbl.lower() for lbl in labels]
-        trains = [t for t, m in zip(trains, mask) if m]
-        labels = [l for l, m in zip(labels, mask) if m]
-
-    if not trains:
-        raise ValueError("No neurons match the given selection.")
-
-    if len(trains) > MAX_NEURONS:
-        raise ValueError(
-            f"{len(trains)} neurons selected — limit is {MAX_NEURONS}. "
-            "Use --neurons or --area to narrow the selection."
-        )
-
-    trials = load_trials_sync()
-    sr     = load_sr()["SamplingRate_Hz"].iloc[0]
-
-    align_times = sp_to_s(trials, sr, EVENTS[event])
+    align_times = event_times_for(trials, sr, event)
     responding  = trials["NotResponding"].to_numpy() != 1
     align_times = np.where(responding, align_times, np.nan)
 
     # Mean timing of other events relative to alignment point.
     markers = {}
-    for name, col in EVENTS.items():
+    for name in EVENTS:
         if name == event:
             continue
-        rel = sp_to_s(trials, sr, col) - align_times
+        rel = event_times_for(trials, sr, name) - align_times
         if not np.any(np.isfinite(rel)):
             continue
         mean_rel_ms = float(np.nanmean(rel)) * 1000
         if -pre_ms <= mean_rel_ms <= post_ms:
             markers[name] = mean_rel_ms
 
-    # Pre-compute condition masks once, outside the neuron loop.
-    cond_masks = None
+    cond = None
     if by_condition:
-        arm_col = trials["ChosenArm_G1S0"].to_numpy()
-        rew_col = trials["Rewarded"].to_numpy()
-        cond_masks = {
-            name: (arm_col == cfg["arm"]) & (rew_col == cfg["rewarded"])
-            for name, cfg in CONDITIONS.items()
-        }
+        cond = condition_masks(trials)
 
     n     = len(trains)
     ncols = min(n, 4)
@@ -151,7 +123,7 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
 
         if by_condition:
             for name, cfg in CONDITIONS.items():
-                cond_align  = align_times[cond_masks[name]]
+                cond_align  = align_times[cond[name]]
                 cond_spikes = compute_aligned_raster(train, cond_align, pre_ms, post_ms)
                 flat        = np.concatenate(cond_spikes) if cond_spikes else np.array([])
                 if len(flat):
@@ -166,9 +138,10 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
                              linelengths=0.8, linewidths=0.5, alpha=0.1)
 
         ax.axvline(0, color="red", linewidth=1.0, linestyle="--",
-                   label=f"{EVENT_STYLE[event]['label']} (align)")
+                   label=f"{EVENTS[event]['label']} (align)")
         for name, t_rel_ms in markers.items():
-            ax.axvline(t_rel_ms, linewidth=0.8, **EVENT_STYLE[name])
+            ax.axvline(t_rel_ms, linewidth=0.8,
+                       label=EVENTS[name]["label"], **EVENT_STYLE[name])
 
         ax.set_xlim(-pre_ms, post_ms)
         ax.set_ylim(-0.6, 0.6)
@@ -182,9 +155,9 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
     for idx in range(n, nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
-    cond_str = "  |  coloured by (arm × reward)" if by_condition else ""
+    cond_str = "  |  coloured by (arm x reward)" if by_condition else ""
     fig.suptitle(
-        f"Aligned raster — session {utils.SESSION}  |  aligned to: {event}{cond_str}"
+        f"Aligned raster — session {session}  |  aligned to: {event}{cond_str}"
         f"  (pre={pre_ms} ms, post={post_ms} ms)",
         fontsize=9,
     )
@@ -197,49 +170,43 @@ def plot_aligned_raster(neuron_indices=None, area=None, event="cue",
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="Spike raster plot")
+    add_session_arg(parser)
+    add_selection_args(parser)
     parser.add_argument("--aligned",  action="store_true",
-                        help="Show trial-by-trial aligned raster instead of full recording")
-    parser.add_argument("t_start",    nargs="?",  type=float, default=None,
+                        help="Trial-by-trial aligned raster (default: full-recording)")
+    parser.add_argument("t_start",    nargs="?", type=float, default=None,
                         help="(full raster) Start time in seconds")
-    parser.add_argument("t_end",      nargs="?",  type=float, default=None,
+    parser.add_argument("t_end",      nargs="?", type=float, default=None,
                         help="(full raster) End time in seconds")
-    parser.add_argument("--event",    type=str,   default="cue", choices=list(EVENTS),
+    parser.add_argument("--event",    type=str,  default="cue", choices=list(EVENTS),
                         help="(aligned) Behavioural event to align to (default: cue)")
     parser.add_argument("--pre",      type=float, default=500,
                         help="(aligned) ms before event (default: 500)")
     parser.add_argument("--post",     type=float, default=1000,
                         help="(aligned) ms after event (default: 1000)")
     parser.add_argument("--by-condition", action="store_true",
-                        help="(aligned) Colour trials by (arm × reward) condition")
-    parser.add_argument("--neurons",  nargs="+",  type=int,   default=None,
-                        help="Neuron indices to show, e.g. --neurons 0 1 5")
-    parser.add_argument("--area",     type=str,   default=None,
-                        help="Show only neurons whose label contains this string")
-    parser.add_argument("--list",     action="store_true",
-                        help="Print all neuron indices and labels, then exit")
+                        help="(aligned) Colour trials by (arm, reward) condition")
     add_save_arg(parser)
     args = parser.parse_args()
 
-    if args.list:
-        _, labels = get_spike_trains()
-        for i, lbl in enumerate(labels):
-            print(f"{i:4d}  {lbl}")
-    elif args.aligned:
+    data_dir = session_data_dir(args.session)
+    if handle_list(args, data_dir=data_dir):
+        raise SystemExit
+
+    if args.aligned:
         fig, _ = plot_aligned_raster(
-            neuron_indices=args.neurons,
-            area=args.area,
-            event=args.event,
-            pre_ms=args.pre,
-            post_ms=args.post,
+            neuron_indices=args.neurons, area=args.area,
+            event=args.event, pre_ms=args.pre, post_ms=args.post,
             by_condition=args.by_condition,
+            data_dir=data_dir, session=args.session,
         )
         maybe_save(fig, args, prefix="aligned_raster")
-        plt.show()
     else:
-        fig, _ = plot_raster(args.t_start, args.t_end,
-                             neuron_indices=args.neurons, area=args.area)
+        fig, _ = plot_raster(
+            args.t_start, args.t_end,
+            neuron_indices=args.neurons, area=args.area,
+            data_dir=data_dir, session=args.session,
+        )
         maybe_save(fig, args, prefix="raster")
-        plt.show()
+    plt.show()

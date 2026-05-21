@@ -1,12 +1,12 @@
 """ZETA-test analysis: test each neuron's responsiveness to behavioural events.
 
-Tests all neurons against cue onset, response-window onset, and reward onset.
-Outputs a summary table sorted by p-value and plots IFRs for the top N
-most significant neurons per event.
+Tests all neurons against cue / response-window / reward / trial-start onsets
+(events from utils.EVENTS). Outputs a summary table sorted by p-value and
+plots IFRs for the top N most significant neurons per event.
 
 Usage:
     python zeta_analysis.py
-    python zeta_analysis.py --event reward --top 10 --save
+    python zeta_analysis.py --session 20250605 --event reward --top 10 --save
     python zeta_analysis.py --event all --dur 2.0 --alpha 0.05
     python zeta_analysis.py --jobs 4          # limit parallel worker processes
 
@@ -32,15 +32,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from zetapy import zetatest
 
-from utils import get_spike_trains, load_trials_sync, load_sr, sp_to_s, SESSION, add_save_arg, maybe_save
+from utils import (
+    EVENTS, RESULTS_SUBDIRS,
+    get_spike_trains, load_trials_sync, load_sr,
+    event_times as event_times_for,
+    add_session_arg, add_save_arg, maybe_save, session_data_dir,
+)
 
-
-EVENTS = {
-    "cue":         {"col": "CuePresent_sp",      "unit": "sp"},
-    "response":    {"col": "RespWindowStart_sp",  "unit": "sp"},
-    "reward":      {"col": "RewardOnset_sp",      "unit": "sp"},
-    "trial_start": {"col": "TrialStart_s",        "unit": "s"},
-}
 
 DEFAULT_DUR_S  = 2.0
 DEFAULT_RESAMP = 100
@@ -50,14 +48,10 @@ DEFAULT_RESAMP = 100
 # Helpers
 # ---------------------------------------------------------------------------
 
-def get_event_times(event_name, trials, sr):
-    """Return event onset times in seconds, responding trials only."""
-    cfg = EVENTS[event_name]
+def responding_event_times(event_name, trials, sr):
+    """Event onset times in seconds, responding trials only."""
+    times      = event_times_for(trials, sr, event_name)
     responding = trials["NotResponding"] == 0
-    if cfg["unit"] == "sp":
-        times = sp_to_s(trials, sr, cfg["col"])
-    else:
-        times = trials[cfg["col"]].to_numpy()
     return times[responding]
 
 
@@ -73,13 +67,13 @@ def _zeta_one(task):
 
     Returns (neuron_idx, result_row, dRate-or-None).
     """
-    i, spikes, label, event_times, dur_s, n_resamp = task
+    i, spikes, label, ev_times, dur_s, n_resamp = task
     if len(spikes) < 10:
         return i, _empty_row(i, label), None
 
     try:
         dblP, dZETA, dRate = zetatest(
-            spikes, event_times,
+            spikes, ev_times,
             dblUseMaxDur=dur_s,
             intResampNum=n_resamp,
             boolReturnRate=True,
@@ -102,16 +96,11 @@ def _zeta_one(task):
     }, dRate
 
 
-def run_zeta_all_neurons(trains, labels, event_times, dur_s=DEFAULT_DUR_S,
+def run_zeta_all_neurons(trains, labels, ev_times, dur_s=DEFAULT_DUR_S,
                          n_resamp=DEFAULT_RESAMP, n_jobs=None):
-    """Run zetatest for every neuron across n_jobs worker processes.
-
-    n_jobs=1 runs serially; None uses every CPU core. Returns a results
-    DataFrame sorted by p-value and a list of rate dicts indexed by
-    neuron_idx (None where a neuron was skipped).
-    """
+    """Run zetatest for every neuron across n_jobs worker processes."""
     n_total = len(trains)
-    tasks   = [(i, spikes, label, event_times, dur_s, n_resamp)
+    tasks   = [(i, spikes, label, ev_times, dur_s, n_resamp)
                for i, (spikes, label) in enumerate(zip(trains, labels))]
 
     rows_by_idx = {}
@@ -142,7 +131,7 @@ def run_zeta_all_neurons(trains, labels, event_times, dur_s=DEFAULT_DUR_S,
 # ---------------------------------------------------------------------------
 
 def plot_ifr_grid(results_df, rate_data_list, alpha, top_n, event_name, args):
-    """Plot IFR for the top_n significant neurons (rate data already in zetatest output)."""
+    """Plot IFR for the top_n significant neurons."""
     sig = results_df[results_df["p_zeta"] < alpha].head(top_n)
     if sig.empty:
         print(f"  No significant neurons (alpha={alpha}) for event '{event_name}'.")
@@ -183,14 +172,17 @@ def plot_ifr_grid(results_df, rate_data_list, alpha, top_n, event_name, args):
     for ax_i in range(len(sig), len(axes_flat)):
         axes_flat[ax_i].set_visible(False)
 
-    fig.suptitle(f"ZETA IFR — event: {event_name} | session: {SESSION} | α={alpha}",
-                 fontsize=10, y=1.01)
+    fig.suptitle(
+        f"ZETA IFR — event: {event_name} | session: {args.session} | alpha={alpha}",
+        fontsize=10, y=1.01,
+    )
     plt.tight_layout()
-    maybe_save(fig, args, prefix=f"zeta_{event_name}")
+    maybe_save(fig, args, prefix=f"zeta_{event_name}",
+               subdir=RESULTS_SUBDIRS["responsiveness"])
     plt.show()
 
 
-def plot_pvalue_overview(all_results, alpha):
+def plot_pvalue_overview(all_results, alpha, session):
     """Fraction of significant neurons per event."""
     events  = list(all_results.keys())
     n_total = [len(df) for df in all_results.values()]
@@ -201,9 +193,9 @@ def plot_pvalue_overview(all_results, alpha):
     bars = ax.bar(events, fracs, color="steelblue", edgecolor="white")
     ax.bar_label(bars, labels=[f"{s}/{n}" for s, n in zip(n_sig, n_total)], fontsize=9)
     ax.set_ylim(0, 1.15)
-    ax.axhline(alpha, color="tomato", ls="--", lw=1, label=f"α={alpha}")
+    ax.axhline(alpha, color="tomato", ls="--", lw=1, label=f"alpha={alpha}")
     ax.set_ylabel("Fraction of significant neurons")
-    ax.set_title(f"ZETA responsiveness — session {SESSION}")
+    ax.set_title(f"ZETA responsiveness — session {session}")
     ax.legend(fontsize=8)
     plt.tight_layout()
     plt.show()
@@ -215,6 +207,7 @@ def plot_pvalue_overview(all_results, alpha):
 
 def parse_args():
     p = argparse.ArgumentParser(description="ZETA responsiveness test for all neurons.")
+    add_session_arg(p)
     p.add_argument("--event",  default="all",
                    choices=list(EVENTS.keys()) + ["all"],
                    help="Which event to align to (default: all).")
@@ -227,7 +220,7 @@ def parse_args():
     p.add_argument("--top",    type=int,   default=8,
                    help="Top N significant neurons to plot (default: 8).")
     p.add_argument("--csv",    action="store_true",
-                   help="Write the full results table per event to results/.")
+                   help=f"Write the full results table per event to {RESULTS_SUBDIRS['responsiveness']}/.")
     p.add_argument("--jobs",   type=int,   default=None,
                    help="Parallel worker processes (default: all CPU cores; 1 = serial).")
     add_save_arg(p)
@@ -235,12 +228,13 @@ def parse_args():
 
 
 def main():
-    args = parse_args()
-    print(f"Session: {SESSION}")
+    args     = parse_args()
+    data_dir = session_data_dir(args.session)
+    print(f"Session: {args.session}")
 
-    trains, labels = get_spike_trains()
-    trials = load_trials_sync()
-    sr     = load_sr()["SamplingRate_Hz"].iloc[0]
+    trains, labels = get_spike_trains(data_dir=data_dir)
+    trials = load_trials_sync(data_dir=data_dir)
+    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
     print(f"Loaded {len(trains)} neurons, {len(trials)} trials, SR={sr} Hz")
     print(f"Workers: {args.jobs or os.cpu_count()} process(es)")
 
@@ -248,11 +242,11 @@ def main():
     all_results   = {}
 
     for event_name in events_to_run:
-        event_times = get_event_times(event_name, trials, sr)
-        print(f"\n--- Event: {event_name} ({len(event_times)} onsets) ---")
+        ev_times = responding_event_times(event_name, trials, sr)
+        print(f"\n--- Event: {event_name} ({len(ev_times)} onsets) ---")
 
         results, rate_data = run_zeta_all_neurons(
-            trains, labels, event_times,
+            trains, labels, ev_times,
             dur_s=args.dur, n_resamp=args.resamp, n_jobs=args.jobs,
         )
         all_results[event_name] = results
@@ -262,9 +256,9 @@ def main():
         print(results[["label", "zeta", "p_zeta", "latency_s", "peak_onset_s"]].head(10).to_string(index=False))
 
         if args.csv:
-            out_dir = os.path.join(os.path.dirname(__file__), "results")
+            out_dir = RESULTS_SUBDIRS["responsiveness"]
             os.makedirs(out_dir, exist_ok=True)
-            csv_path = os.path.join(out_dir, f"zeta_{event_name}_{SESSION}.csv")
+            csv_path = os.path.join(out_dir, f"zeta_{event_name}_{args.session}.csv")
             results.to_csv(csv_path, index=False)
             print(f"Saved -> {csv_path}")
 
@@ -273,7 +267,7 @@ def main():
                       event_name=event_name, args=args)
 
     if len(events_to_run) > 1:
-        plot_pvalue_overview(all_results, args.alpha)
+        plot_pvalue_overview(all_results, args.alpha, args.session)
 
 
 if __name__ == "__main__":

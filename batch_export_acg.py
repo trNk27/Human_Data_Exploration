@@ -1,19 +1,18 @@
-"""Run export_acg.py for every session not yet processed."""
+"""Run export_acg.py for every session not yet processed.
+
+Invokes each session via `--session <id>`; no utils.py rewriting.
+"""
 
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+from utils import REPO_ROOT
+
 DONE = {"20250521", "20250602"}
 
-HERE = Path(__file__).parent
-UTILS = HERE / "utils.py"
-SESSION_RE = re.compile(r'^(SESSION\s*=\s*")[^"]*(")', re.MULTILINE)
-
-
-def set_session(text: str, session: str) -> str:
-    return SESSION_RE.sub(rf'\g<1>{session}\g<2>', text)
+HERE = Path(REPO_ROOT)
 
 
 def main():
@@ -28,21 +27,15 @@ def main():
 
     print(f"Sessions to export: {sessions}\n")
 
-    original = UTILS.read_text(encoding="utf-8")
-    try:
-        for session in sessions:
-            print(f"=== {session} ===")
-            UTILS.write_text(set_session(original, session), encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(HERE / "export_acg.py")],
-                cwd=str(HERE),
-            )
-            if result.returncode != 0:
-                print(f"  WARNING: export_acg.py exited with code {result.returncode} for {session}")
-            print()
-    finally:
-        UTILS.write_text(original, encoding="utf-8")
-        print("utils.py restored.")
+    for session in sessions:
+        print(f"=== {session} ===")
+        result = subprocess.run(
+            [sys.executable, str(HERE / "export_acg.py"), "--session", session],
+            cwd=str(HERE),
+        )
+        if result.returncode != 0:
+            print(f"  WARNING: export_acg.py exited with code {result.returncode} for {session}")
+        print()
 
 
 if __name__ == "__main__":

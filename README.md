@@ -137,48 +137,84 @@ run from the repo root.
 
 ## Selecting the active session
 
-Every loader reads the session named by `SESSION` in `utils.py` (line 12). To
-switch sessions, edit that one constant — e.g. `SESSION = "20250602"`. A
-session is one `YYYYMMDD/` directory holding `SR.mat`, `STMtx.mat`,
-`Trials_Sync.mat` (and optionally `Human_Data_Table.mat`). Adding a session =
-dropping a new `YYYYMMDD/` directory next to the existing ones. The batch
-scripts rewrite this constant automatically to sweep every session.
+Every script takes a `--session YYYYMMDD` flag that picks which session
+directory to load. The default (used when `--session` is omitted) is the
+`SESSION` constant in `utils.py`. A session is one `YYYYMMDD/` directory
+holding `SR.mat`, `STMtx.mat`, `Trials_Sync.mat` (and optionally
+`Human_Data_Table.mat`). Adding a session = dropping a new `YYYYMMDD/`
+directory next to the existing ones.
+
+```
+python psth.py --session 20250605 --event reward
+python browser.py --session 20250710
+```
+
+The batch scripts iterate sessions internally and pass `--session` through to
+the underlying tools — `utils.py` is never mutated.
 
 ## Conventions shared across scripts
 
+- **Session:** `--session YYYYMMDD` everywhere (defaults to `utils.SESSION`).
 - **Units:** analysis parameters (bins, windows, lags) are in **milliseconds**
   (`--bin`, `--pre`, `--post`, `--lag`); absolute spike/event timestamps stay
   in **seconds**, as stored in the data.
+- **Events:** the canonical keys are `cue`, `response`, `reward`, `trial_start`
+  — defined once in `utils.EVENTS` and used by every script.
+- **Outcome conditions:** `G+R` (gamble + rewarded), `G+N` (gamble + not
+  rewarded), `S+R` (safe + rewarded) — defined once in `utils.CONDITIONS`.
 - **Neuron IDs:** the column index in `STMtx` is the neuron ID. Labels read
   `unit | area electrode (su/mu)` (single- / multi-unit).
-- `--list` — most plotting scripts: print every neuron index + label, then exit.
+- `--list` — every plotting script: print every neuron index + label, then exit.
 - `--neurons 0 1 5` — restrict to specific neuron indices.
 - `--area MFG` — restrict to neurons whose label contains a substring
   (case-insensitive).
 - `--save [FILE]` — save the figure; with no path it auto-names
-  `<prefix>_<session>.png`. Omitting `--save` only shows the plot on screen.
-- Per-figure plotting scripts cap at `MAX_NEURONS` (90) — narrow the selection
-  with `--neurons`/`--area` if you exceed it.
+  `<prefix>_<session>.png` and (for the ZETA/direction scripts) drops it in
+  the appropriate `results/` subfolder. Omitting `--save` only shows the plot.
+- Per-figure plotting scripts cap at `MAX_NEURONS` (90) — narrow with
+  `--neurons`/`--area` if you exceed it.
 
 ## `utils.py` — shared utilities
 
 Single source of truth, imported by every other script; not run directly.
-Provides the `SESSION` / `DATA_DIR` / `MAX_NEURONS` constants, the `.mat`
-loaders (`load_sr`, `load_stmtx`, `load_trials_sync` — each accepts an optional
-`data_dir`), `get_spike_trains()` → `(trains, labels)`, `sp_to_s()` for
-sampling-point → seconds conversion, and the shared `--save` plumbing
-(`add_save_arg` / `maybe_save`).
+Provides:
+
+- Constants: `SESSION`, `DATA_DIR`, `MAX_NEURONS`, `REPO_ROOT`, `RESULTS_DIR`,
+  `RESULTS_SUBDIRS`.
+- `EVENTS`, `EVENT_STYLE`, `CONDITIONS` — canonical dictionaries used everywhere.
+- `.mat` loaders: `load_sr`, `load_stmtx`, `load_trials_sync` (each accepts an
+  optional `data_dir`).
+- Data helpers: `get_spike_trains()`, `sp_to_s()`, `event_times()`,
+  `condition_masks()`, `condition_event_times()`, `session_data_dir()`.
+- CLI helpers: `add_session_arg`, `add_selection_args`, `add_save_arg`,
+  `select_neurons`, `handle_list`, `maybe_save`.
+
+## Output layout
+
+```
+results/
+  zeta_responsiveness/   zeta_<event>_<session>.{csv,png}
+  zeta_outcome/          zeta2_<contrast>_<session>.{csv,png}
+  direction/             direction_<contrast>.png
+acg_export/<session>/    one PNG per neuron (export_acg.py)
+csv/<session>/           .mat -> .csv exports (mat_to_csv.py)
+```
 
 ---
 
 ## Data inspection
 
 ### `file_explorer.py`
-Prints a textual overview of the active session: sampling rate, the first rows
-of the spike matrix and trial table, and shape/summary info. No arguments.
+Prints a textual overview of one session: sampling rate, the first rows of
+the spike matrix and trial table, and shape/summary info.
+
+| Argument | Default | Description |
+|---|---|---|
+| `--session YYYYMMDD` | `utils.SESSION` | session to inspect |
 
 ```
 python file_explorer.py
+python file_explorer.py --session 20250605
 ```
 
 ### `mat_to_csv.py`
@@ -201,9 +237,10 @@ behavioural event (one subplot per neuron, one row per trial).
 
 | Argument | Default | Description |
 |---|---|---|
+| `--session YYYYMMDD` | `utils.SESSION` | session to load |
 | `t_start t_end` | none | (full mode) positional start / end time in seconds |
 | `--aligned` | off | trial-by-trial aligned raster instead of full recording |
-| `--event {cue,response,reward,start}` | `cue` | (aligned) event to align to |
+| `--event {cue,response,reward,trial_start}` | `cue` | (aligned) event to align to |
 | `--pre` | 500 | (aligned) ms before event |
 | `--post` | 1000 | (aligned) ms after event |
 | `--by-condition` | off | (aligned) colour trials by (arm × reward) condition |
@@ -213,7 +250,7 @@ behavioural event (one subplot per neuron, one row per trial).
 | `--save [FILE]` | — | save the figure |
 
 ```
-python raster_plot.py 0 60
+python raster_plot.py --session 20250605 0 60
 python raster_plot.py --aligned --event reward --pre 500 --post 1500 --area MFG
 ```
 
@@ -223,7 +260,8 @@ across trials. Marker lines show the mean timing of the other events.
 
 | Argument | Default | Description |
 |---|---|---|
-| `--event {cue,response,reward,start}` | `cue` | alignment event |
+| `--session YYYYMMDD` | `utils.SESSION` | session to load |
+| `--event {cue,response,reward,trial_start}` | `cue` | alignment event |
 | `--pre` | 500 | ms before event |
 | `--post` | 1000 | ms after event |
 | `--bin` | 50 | histogram bin width (ms) |
@@ -232,7 +270,7 @@ across trials. Marker lines show the mean timing of the other events.
 | `--neurons` / `--area` / `--list` / `--save` | — | as in the shared conventions |
 
 ```
-python psth.py --event reward --bin 25 --sigma 50 --by-condition
+python psth.py --session 20250605 --event reward --bin 25 --sigma 50 --by-condition
 ```
 
 ### `autocorrelogram.py`
@@ -240,6 +278,7 @@ Per-neuron autocorrelogram via FFT-based circular autocorrelation.
 
 | Argument | Default | Description |
 |---|---|---|
+| `--session YYYYMMDD` | `utils.SESSION` | session to load |
 | `--lag` | 200 | max lag (ms) |
 | `--bin` | 1 | bin width (ms) |
 | `--neurons` / `--area` / `--list` / `--save` | — | as in the shared conventions |
@@ -255,7 +294,8 @@ a neuron index.
 
 | Argument | Default | Description |
 |---|---|---|
-| `--event {cue,response,reward,start}` | `cue` | PSTH alignment event |
+| `--session YYYYMMDD` | `utils.SESSION` | session to load |
+| `--event {cue,response,reward,trial_start}` | `cue` | PSTH alignment event |
 | `--pre` / `--post` | 500 / 1000 | PSTH window (ms) |
 | `--bin` | 50 | PSTH bin width (ms) |
 | `--lag` | 200 | ACG max lag (ms) |
@@ -263,7 +303,7 @@ a neuron index.
 | `--neurons` / `--area` | — | restrict the neuron selection |
 
 ```
-python browser.py --event reward --area MFG
+python browser.py --session 20250605 --event reward --area MFG
 ```
 
 ---
@@ -273,8 +313,8 @@ python browser.py --event reward --area MFG
 ZETA (Zenith of Event-based Time-locked Anomalies) is a parameter-free test for
 whether spike timing is modulated relative to events. Requires `zetapy`. Both
 scripts test every neuron in parallel across CPU cores and write results to
-`results/`. Pass `--csv` to write the table and `--save` to write the plot;
-without them the scripts only print and show.
+the appropriate `results/` subfolder. Pass `--csv` to write the table and
+`--save` to write the plot; without them the scripts only print and show.
 
 ### `zeta_analysis.py` — one-sample ZETA (responsiveness)
 Tests whether each neuron *responds* to a behavioural event, against a uniform
@@ -283,14 +323,15 @@ the top-N most significant neurons.
 
 | Argument | Default | Description |
 |---|---|---|
+| `--session YYYYMMDD` | `utils.SESSION` | session to test |
 | `--event {cue,response,reward,trial_start,all}` | `all` | event(s) to test |
 | `--dur` | 2.0 | analysis window (s) after the event |
 | `--resamp` | 100 | jitter iterations |
 | `--alpha` | 0.05 | significance threshold |
 | `--top` | 8 | top-N significant neurons to plot |
-| `--csv` | off | write `results/zeta_<event>_<session>.csv` |
+| `--csv` | off | write `results/zeta_responsiveness/zeta_<event>_<session>.csv` |
 | `--jobs` | all cores | parallel worker processes (`1` = serial) |
-| `--save [FILE]` | — | save the IFR plot (auto-named `zeta_<event>_<session>.png`) |
+| `--save [FILE]` | — | save the IFR plot (auto-named in `results/zeta_responsiveness/`) |
 
 ```
 python zeta_analysis.py --event reward --csv --save
@@ -307,14 +348,15 @@ Outcomes — `G+R` (gamble + rewarded), `G+N` (gamble + not rewarded), `S+R`
 
 | Argument | Default | Description |
 |---|---|---|
+| `--session YYYYMMDD` | `utils.SESSION` | session to test |
 | `--contrast {reward,choice,all}` | `all` | contrast(s) to run |
 | `--dur` | 2.0 | analysis window (s) |
 | `--resamp` | 250 | jitter iterations |
 | `--alpha` | 0.05 | significance threshold |
 | `--top` | 8 | top-N significant neurons to plot |
-| `--csv` | off | write `results/zeta2_<contrast>_<session>.csv` |
+| `--csv` | off | write `results/zeta_outcome/zeta2_<contrast>_<session>.csv` |
 | `--jobs` | all cores | parallel worker processes (`1` = serial) |
-| `--save [FILE]` | — | save the plot (auto-named `zeta2_<contrast>_<session>.png`) |
+| `--save [FILE]` | — | save the plot (auto-named in `results/zeta_outcome/`) |
 
 ```
 python zeta_outcome.py --contrast reward --csv --save
@@ -325,15 +367,34 @@ python zeta_outcome.py --contrast reward --csv --save
 > between conditions. Comparing two separate one-sample p-values is not a valid
 > difference test — use `zeta_outcome.py` for that.
 
+### `outcome_direction.py` — sign of the effect
+Post-hoc: for each neuron in the existing `zeta_outcome/` CSVs, compute the
+mean firing rate per condition in a window `[zeta_t_s − w, zeta_t_s + w]`
+(clipped to `[0, dur]`) and derive a selectivity index
+`SI = (r_a − r_b)/(r_a + r_b)`. Adds `rate_<a>, rate_<b>, SI, preference`
+columns to each `zeta2_*` CSV in place. Pools across sessions and writes a
+binomial-skew histogram per contrast to `results/direction/`.
+
+| Argument | Default | Description |
+|---|---|---|
+| `--sessions YYYYMMDD ...` | all | sessions to process |
+| `--window-ms` | 300 | half-width of the rate window around `zeta_t_s` |
+| `--dur` | 2.0 | ZETA analysis window (must match what `zeta_outcome.py` used) |
+| `--alpha` | 0.05 | significance threshold for the histogram |
+
+```
+python outcome_direction.py
+python outcome_direction.py --window-ms 200 --sessions 20250605
+```
+
 ---
 
 ## Batch & export tools
 
 ### `batch_zeta.py`
-Runs the ZETA scripts for **every session**. For each session it temporarily
-rewrites `SESSION` in `utils.py` (restored afterwards), runs the selected
-script(s) with `--csv --save --top 8`, and collects all CSVs + PNGs in
-`results/`.
+Runs the ZETA scripts for **every session** by invoking them as subprocesses
+with `--session <id>` — `utils.py` is never mutated. Collects CSVs + PNGs in
+the appropriate `results/` subfolder.
 
 | Argument | Default | Description |
 |---|---|---|
@@ -349,16 +410,21 @@ python batch_zeta.py --sessions 20250521 20250602 --jobs 6
 ```
 
 ### `export_acg.py`
-Batch-exports an autocorrelogram PNG for every neuron in the active session
-(two panels: ±75 ms and ±300 ms) to `acg_export/<session>/`. No arguments.
+Batch-exports an autocorrelogram PNG for every neuron in one session
+(two panels: ±75 ms and ±300 ms) to `acg_export/<session>/`.
+
+| Argument | Default | Description |
+|---|---|---|
+| `--session YYYYMMDD` | `utils.SESSION` | session to export |
 
 ```
 python export_acg.py
+python export_acg.py --session 20250605
 ```
 
 ### `batch_export_acg.py`
-Runs `export_acg.py` for every session not already in its `DONE` set,
-rewriting `SESSION` per session. No arguments.
+Runs `export_acg.py` for every session not already in its in-script `DONE`
+set, passing `--session` to each invocation. No arguments.
 
 ```
 python batch_export_acg.py
@@ -376,12 +442,15 @@ python generate_test_data.py
 
 ## Typical workflows
 
-- **Inspect a new session** — drop the `YYYYMMDD/` folder into the repo, set
-  `SESSION` in `utils.py`, run `python file_explorer.py`.
-- **Look at single neurons** — `python browser.py`, or
-  `python psth.py --by-condition` for a condition-split overview.
+- **Inspect a new session** — drop the `YYYYMMDD/` folder into the repo, then
+  `python file_explorer.py --session YYYYMMDD`.
+- **Look at single neurons** —
+  `python browser.py --session 20250605` (interactive PSTH + ACG), or
+  `python psth.py --session 20250605 --by-condition` for a condition-split overview.
 - **Full ZETA sweep across all sessions** — `python batch_zeta.py` writes
-  every session's responsiveness and outcome CSVs + plots to `results/`.
+  every session's responsiveness and outcome CSVs + plots to the appropriate
+  `results/` subfolder, then `python outcome_direction.py` appends the
+  direction columns and saves the SI histograms.
 
 > The `csv/` and `.mat` files are gitignored — large, externally produced
 > inputs/outputs that are not committed.

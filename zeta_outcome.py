@@ -1,7 +1,7 @@
 """Two-sample ZETA: does a neuron's reward-aligned response differ by outcome?
 
 All trials are aligned to reward onset (RewardOnset_sp), responding trials
-only. Three outcomes are considered:
+only. Three outcomes are considered (defined in utils.CONDITIONS):
 
     G+R   gamble arm, rewarded
     G+N   gamble arm, not rewarded
@@ -21,7 +21,7 @@ Neurons are tested in parallel across CPU cores (see --jobs).
 
 Usage:
     python zeta_outcome.py
-    python zeta_outcome.py --contrast reward --top 10 --save --csv
+    python zeta_outcome.py --session 20250605 --contrast reward --top 10 --save --csv
     python zeta_outcome.py --jobs 4
 
 Requires: pip install zetapy
@@ -43,10 +43,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from zetapy import zetatest2
 
-from utils import get_spike_trains, load_trials_sync, load_sr, sp_to_s, SESSION, add_save_arg, maybe_save
+from utils import (
+    RESULTS_SUBDIRS,
+    get_spike_trains, load_trials_sync, load_sr,
+    condition_event_times,
+    add_session_arg, add_save_arg, maybe_save, session_data_dir,
+)
 
-
-REWARD_COL = "RewardOnset_sp"   # outcome onset, sampling points; present on no-reward trials too
 
 # Each contrast compares condition "a" against condition "b" (same neuron).
 CONTRASTS = {
@@ -61,23 +64,6 @@ MIN_TRIALS     = 10
 
 
 # ---------------------------------------------------------------------------
-# Conditions
-# ---------------------------------------------------------------------------
-
-def condition_event_times(trials, sr):
-    """Reward-onset times (seconds) split into the three outcome conditions."""
-    times      = sp_to_s(trials, sr, REWARD_COL)
-    responding = (trials["NotResponding"] == 0).to_numpy()
-    gamble     = (trials["ChosenArm_G1S0"] == 1).to_numpy()
-    rewarded   = (trials["Rewarded"] == 1).to_numpy()
-    return {
-        "G+R": times[responding &  gamble &  rewarded],
-        "G+N": times[responding &  gamble & ~rewarded],
-        "S+R": times[responding & ~gamble &  rewarded],
-    }
-
-
-# ---------------------------------------------------------------------------
 # ZETA
 # ---------------------------------------------------------------------------
 
@@ -88,17 +74,12 @@ def _empty_row(i, label):
 
 
 def _zeta2_one(task):
-    """Run zetatest2 for one neuron. Top-level so it is picklable for the pool.
-
-    Returns (neuron_idx, result_row, plot_data-or-None).
-    """
+    """Run zetatest2 for one neuron. Top-level so it is picklable for the pool."""
     i, spikes, label, events_a, events_b, dur_s, n_resamp = task
     if len(spikes) < MIN_SPIKES or len(events_a) < MIN_TRIALS or len(events_b) < MIN_TRIALS:
         return i, _empty_row(i, label), None
 
     try:
-        # Same spike train, two event subsets: tests whether the event-locked
-        # response differs between condition a and condition b.
         dblP, dZETA = zetatest2(
             spikes, events_a, spikes, events_b,
             dblUseMaxDur=dur_s,
@@ -118,20 +99,12 @@ def _zeta2_one(task):
         "mean_z":     dZETA["dblMeanZ"],
         "p_mean":     dZETA["dblMeanP"],
     }
-    # Keep only the difference curve for plotting — the resampled null arrays
-    # in dZETA are large and not needed downstream.
     plot_data = {"vecSpikeT": dZETA["vecSpikeT"], "vecRealDiff": dZETA["vecRealDiff"]}
     return i, row, plot_data
 
 
 def run_zeta2_all_neurons(trains, labels, events_a, events_b,
                           dur_s=DEFAULT_DUR_S, n_resamp=DEFAULT_RESAMP, n_jobs=None):
-    """Run zetatest2 for every neuron across n_jobs worker processes.
-
-    n_jobs=1 runs serially; None uses every CPU core. Returns a results
-    DataFrame sorted by p-value and a list of plot-data dicts indexed by
-    neuron_idx (None where a neuron was skipped).
-    """
     n_total = len(trains)
     tasks   = [(i, spikes, label, events_a, events_b, dur_s, n_resamp)
                for i, (spikes, label) in enumerate(zip(trains, labels))]
@@ -164,11 +137,6 @@ def run_zeta2_all_neurons(trains, labels, events_a, events_b,
 # ---------------------------------------------------------------------------
 
 def plot_diff_grid(results_df, plot_data_list, alpha, top_n, contrast, args):
-    """Plot the ZETA difference curve for the top_n most significant neurons.
-
-    vecRealDiff is the temporal deviation between the two conditions' cumulative
-    spike vectors; its largest excursion from zero is what ZETA scores.
-    """
     cfg = CONTRASTS[contrast]
     sig = results_df[results_df["p_zeta"] < alpha].head(top_n)
     if sig.empty:
@@ -200,17 +168,21 @@ def plot_diff_grid(results_df, plot_data_list, alpha, top_n, contrast, args):
         short_label = row["label"].split("|")[0].strip()
         ax.set_title(f"{short_label}\np={row['p_zeta']:.2e}", fontsize=8)
         ax.set_xlabel("Time from reward onset (s)", fontsize=7)
-        ax.set_ylabel(f"Cum. spike diff\n({cfg['a']} − {cfg['b']})", fontsize=7)
+        ax.set_ylabel(f"Cum. spike diff\n({cfg['a']} - {cfg['b']})", fontsize=7)
         ax.tick_params(labelsize=7)
         ax.legend(fontsize=6, loc="upper right")
 
     for ax_i in range(len(sig), len(axes_flat)):
         axes_flat[ax_i].set_visible(False)
 
-    fig.suptitle(f"Two-sample ZETA — {contrast}: {cfg['a']} vs {cfg['b']} "
-                 f"| session: {SESSION} | α={alpha}", fontsize=10, y=1.01)
+    fig.suptitle(
+        f"Two-sample ZETA — {contrast}: {cfg['a']} vs {cfg['b']} "
+        f"| session: {args.session} | alpha={alpha}",
+        fontsize=10, y=1.01,
+    )
     plt.tight_layout()
-    maybe_save(fig, args, prefix=f"zeta2_{contrast}")
+    maybe_save(fig, args, prefix=f"zeta2_{contrast}",
+               subdir=RESULTS_SUBDIRS["outcome"])
     plt.show()
 
 
@@ -220,6 +192,7 @@ def plot_diff_grid(results_df, plot_data_list, alpha, top_n, contrast, args):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Two-sample ZETA test for outcome differences.")
+    add_session_arg(p)
     p.add_argument("--contrast", default="all",
                    choices=list(CONTRASTS.keys()) + ["all"],
                    help="Which contrast to run (default: all).")
@@ -232,7 +205,7 @@ def parse_args():
     p.add_argument("--top",    type=int,   default=8,
                    help="Top N significant neurons to plot (default: 8).")
     p.add_argument("--csv",    action="store_true",
-                   help="Write the full results table per contrast to results/.")
+                   help=f"Write the full results table to {RESULTS_SUBDIRS['outcome']}/.")
     p.add_argument("--jobs",   type=int,   default=None,
                    help="Parallel worker processes (default: all CPU cores; 1 = serial).")
     add_save_arg(p)
@@ -240,16 +213,17 @@ def parse_args():
 
 
 def main():
-    args = parse_args()
-    print(f"Session: {SESSION}")
+    args     = parse_args()
+    data_dir = session_data_dir(args.session)
+    print(f"Session: {args.session}")
 
-    trains, labels = get_spike_trains()
-    trials = load_trials_sync()
-    sr     = load_sr()["SamplingRate_Hz"].iloc[0]
+    trains, labels = get_spike_trains(data_dir=data_dir)
+    trials = load_trials_sync(data_dir=data_dir)
+    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
     print(f"Loaded {len(trains)} neurons, {len(trials)} trials, SR={sr} Hz")
     print(f"Workers: {args.jobs or os.cpu_count()} process(es)")
 
-    cond_times = condition_event_times(trials, sr)
+    cond_times = condition_event_times(trials, sr, event="reward")
     print("Outcome trial counts: "
           + ", ".join(f"{name}={len(t)}" for name, t in cond_times.items()))
 
@@ -260,7 +234,7 @@ def main():
         events_a = cond_times[cfg["a"]]
         events_b = cond_times[cfg["b"]]
         print(f"\n--- Contrast: {contrast} | {cfg['a']} ({len(events_a)}) "
-              f"vs {cfg['b']} ({len(events_b)}) — {cfg['desc']} ---")
+              f"vs {cfg['b']} ({len(events_b)}) - {cfg['desc']} ---")
 
         results, plot_data = run_zeta2_all_neurons(
             trains, labels, events_a, events_b,
@@ -272,9 +246,9 @@ def main():
         print(results[["label", "zeta", "p_zeta", "zeta_t_s", "p_mean"]].head(10).to_string(index=False))
 
         if args.csv:
-            out_dir = os.path.join(os.path.dirname(__file__), "results")
+            out_dir = RESULTS_SUBDIRS["outcome"]
             os.makedirs(out_dir, exist_ok=True)
-            csv_path = os.path.join(out_dir, f"zeta2_{contrast}_{SESSION}.csv")
+            csv_path = os.path.join(out_dir, f"zeta2_{contrast}_{args.session}.csv")
             results.to_csv(csv_path, index=False)
             print(f"Saved -> {csv_path}")
 
