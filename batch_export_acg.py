@@ -3,6 +3,7 @@
 Invokes each session via `--session <id>`; no utils.py rewriting.
 """
 
+import argparse
 import re
 import subprocess
 import sys
@@ -16,6 +17,10 @@ HERE = Path(REPO_ROOT)
 
 
 def main():
+    argparse.ArgumentParser(
+        description="Run export_acg.py for every YYYYMMDD/ session not in the DONE set."
+    ).parse_args()
+
     sessions = sorted(
         d.name for d in HERE.iterdir()
         if d.is_dir() and re.fullmatch(r'\d{8}', d.name) and d.name not in DONE

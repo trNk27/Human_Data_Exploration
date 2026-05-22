@@ -73,7 +73,17 @@ def parse_args():
                    help="Analysis window in seconds passed to the ZETA scripts.")
     p.add_argument("--jobs", type=int,
                    help="Parallel worker processes per session (default: all CPU cores).")
-    return p.parse_args()
+    p.add_argument("--event", metavar="EVENT",
+                   help="Restrict the responsiveness analysis to one event "
+                        "(default: 'all'). Required when --window-end is set.")
+    p.add_argument("--window-end", metavar="EVENT",
+                   help="Variable-duration mode: per-trial [event, window_end]. "
+                        "Forwarded to zeta_analysis.py (responsiveness only). "
+                        "Implies and requires --event.")
+    args = p.parse_args()
+    if args.window_end and not args.event:
+        p.error("--window-end requires --event (e.g. --event cue --window-end reward).")
+    return args
 
 
 def main():
@@ -94,6 +104,16 @@ def main():
     if args.jobs is not None:
         extra += ["--jobs", str(args.jobs)]
 
+    # Per-analysis flags that override the script's fixed args in ANALYSES.
+    # --event/--window-end only apply to the responsiveness script — the
+    # outcome script has its own --contrast loop instead.
+    responsiveness_overrides = []
+    if args.event is not None:
+        # Replace the default "--event all" with the user's pick.
+        responsiveness_overrides += ["--event", args.event]
+    if args.window_end is not None:
+        responsiveness_overrides += ["--window-end", args.window_end]
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print(f"Sessions: {sessions}")
     print(f"Analyses: {selected}\n")
@@ -106,10 +126,19 @@ def main():
         print(f"=== {session} ===", flush=True)
         for name in selected:
             cfg = ANALYSES[name]
-            print(f"  -- {name}: {cfg['script']} --", flush=True)
+            # When the user passed --event / --window-end, swap out the
+            # default "--event all" for the explicit selection.
+            script_args = list(cfg["args"])
+            if name == "responsiveness" and responsiveness_overrides:
+                # Drop the default "--event all" pair so our override wins.
+                if "--event" in script_args:
+                    i = script_args.index("--event")
+                    del script_args[i:i+2]
+                script_args = responsiveness_overrides + script_args
+            print(f"  -- {name}: {cfg['script']} {' '.join(script_args)} --", flush=True)
             result = subprocess.run(
                 [sys.executable, str(HERE / cfg["script"]),
-                 "--session", session, *cfg["args"], *extra],
+                 "--session", session, *script_args, *extra],
                 env=env,
             )
             if result.returncode != 0:

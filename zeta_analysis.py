@@ -10,6 +10,11 @@ Usage:
     python zeta_analysis.py --event all --dur 2.0 --alpha 0.05
     python zeta_analysis.py --jobs 4          # limit parallel worker processes
 
+    # Variable-duration window: per trial, use [event, window_end] instead of
+    # a fixed --dur. Useful for cue, where the cue->reward interval varies and
+    # a fixed 2s window leaks into post-reward activity.
+    python zeta_analysis.py --event cue --window-end reward --csv --save
+
 Neurons are tested in parallel across CPU cores by default (--jobs 1 forces
 serial). The CLI must therefore be run as a script, not imported.
 
@@ -53,6 +58,24 @@ def responding_event_times(event_name, trials, sr):
     times      = event_times_for(trials, sr, event_name)
     responding = trials["NotResponding"] == 0
     return times[responding]
+
+
+def responding_event_windows(start_event, end_event, trials, sr):
+    """Per-trial [start, end] times (seconds) for ZETA's variable-duration mode.
+
+    Returns an array of shape (n_valid_trials, 2). Includes only responding
+    trials where both endpoints are finite and end > start. Trials that fail
+    the check are dropped and reported.
+    """
+    starts = event_times_for(trials, sr, start_event)
+    ends   = event_times_for(trials, sr, end_event)
+    responding = (trials["NotResponding"] == 0).to_numpy()
+    valid = responding & np.isfinite(starts) & np.isfinite(ends) & (ends > starts)
+    n_dropped = int(responding.sum() - valid.sum())
+    if n_dropped:
+        print(f"  Dropped {n_dropped} responding trials with invalid "
+              f"[{start_event} -> {end_event}] window.")
+    return np.column_stack([starts[valid], ends[valid]])
 
 
 def _empty_row(i, label):
@@ -130,8 +153,13 @@ def run_zeta_all_neurons(trains, labels, ev_times, dur_s=DEFAULT_DUR_S,
 # Plotting
 # ---------------------------------------------------------------------------
 
-def plot_ifr_grid(results_df, rate_data_list, alpha, top_n, event_name, args):
+def plot_ifr_grid(results_df, rate_data_list, alpha, top_n, event_name, args,
+                  file_prefix=None):
     """Plot IFR for the top_n significant neurons."""
+    if file_prefix is None:
+        file_prefix = f"zeta_{event_name}"
+    window_desc = (f"{event_name} -> {args.window_end} (per-trial)"
+                   if args.window_end else f"{event_name} (fixed {args.dur}s)")
     sig = results_df[results_df["p_zeta"] < alpha].head(top_n)
     if sig.empty:
         print(f"  No significant neurons (alpha={alpha}) for event '{event_name}'.")
@@ -173,11 +201,11 @@ def plot_ifr_grid(results_df, rate_data_list, alpha, top_n, event_name, args):
         axes_flat[ax_i].set_visible(False)
 
     fig.suptitle(
-        f"ZETA IFR — event: {event_name} | session: {args.session} | alpha={alpha}",
+        f"ZETA IFR — {window_desc} | session: {args.session} | alpha={alpha}",
         fontsize=10, y=1.01,
     )
     plt.tight_layout()
-    maybe_save(fig, args, prefix=f"zeta_{event_name}",
+    maybe_save(fig, args, prefix=file_prefix,
                subdir=RESULTS_SUBDIRS["responsiveness"])
     plt.show()
 
@@ -212,7 +240,12 @@ def parse_args():
                    choices=list(EVENTS.keys()) + ["all"],
                    help="Which event to align to (default: all).")
     p.add_argument("--dur",    type=float, default=DEFAULT_DUR_S,
-                   help=f"Analysis window in seconds (default: {DEFAULT_DUR_S}).")
+                   help=f"Fixed analysis window in seconds (default: {DEFAULT_DUR_S}). "
+                        "Ignored when --window-end is set.")
+    p.add_argument("--window-end", default=None, choices=list(EVENTS),
+                   help="Variable-duration mode: use [event, window_end] per "
+                        "trial instead of a fixed --dur. Requires a specific "
+                        "--event (not 'all'). Example: --event cue --window-end reward.")
     p.add_argument("--resamp", type=int,   default=DEFAULT_RESAMP,
                    help=f"Jitter iterations (default: {DEFAULT_RESAMP}).")
     p.add_argument("--alpha",  type=float, default=0.05,
@@ -224,7 +257,12 @@ def parse_args():
     p.add_argument("--jobs",   type=int,   default=None,
                    help="Parallel worker processes (default: all CPU cores; 1 = serial).")
     add_save_arg(p)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.window_end and args.event == "all":
+        p.error("--window-end requires a specific --event (not 'all').")
+    if args.window_end == args.event:
+        p.error("--window-end must differ from --event.")
+    return args
 
 
 def main():
@@ -240,14 +278,27 @@ def main():
 
     events_to_run = list(EVENTS.keys()) if args.event == "all" else [args.event]
     all_results   = {}
+    suffix        = f"_to_{args.window_end}" if args.window_end else ""
 
     for event_name in events_to_run:
-        ev_times = responding_event_times(event_name, trials, sr)
-        print(f"\n--- Event: {event_name} ({len(ev_times)} onsets) ---")
+        # 1-D onsets (fixed --dur) or 2-D [onset, offset] per trial (--window-end).
+        if args.window_end:
+            ev_times = responding_event_windows(event_name, args.window_end, trials, sr)
+            durations = ev_times[:, 1] - ev_times[:, 0]
+            dur_used  = float(durations.max())
+            print(f"\n--- Event: {event_name} -> {args.window_end} | "
+                  f"{len(ev_times)} trials, "
+                  f"window {durations.min():.2f}..{dur_used:.2f}s "
+                  f"(median {np.median(durations):.2f}s) ---")
+        else:
+            ev_times = responding_event_times(event_name, trials, sr)
+            dur_used = args.dur
+            print(f"\n--- Event: {event_name} ({len(ev_times)} onsets, "
+                  f"fixed {dur_used}s window) ---")
 
         results, rate_data = run_zeta_all_neurons(
             trains, labels, ev_times,
-            dur_s=args.dur, n_resamp=args.resamp, n_jobs=args.jobs,
+            dur_s=dur_used, n_resamp=args.resamp, n_jobs=args.jobs,
         )
         all_results[event_name] = results
 
@@ -258,13 +309,14 @@ def main():
         if args.csv:
             out_dir = RESULTS_SUBDIRS["responsiveness"]
             os.makedirs(out_dir, exist_ok=True)
-            csv_path = os.path.join(out_dir, f"zeta_{event_name}_{args.session}.csv")
+            csv_path = os.path.join(out_dir, f"zeta_{event_name}{suffix}_{args.session}.csv")
             results.to_csv(csv_path, index=False)
             print(f"Saved -> {csv_path}")
 
         plot_ifr_grid(results, rate_data,
                       alpha=args.alpha, top_n=args.top,
-                      event_name=event_name, args=args)
+                      event_name=event_name, args=args,
+                      file_prefix=f"zeta_{event_name}{suffix}")
 
     if len(events_to_run) > 1:
         plot_pvalue_overview(all_results, args.alpha, args.session)
