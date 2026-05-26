@@ -37,11 +37,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from zetapy import zetatest
 
+from session import Session
 from utils import (
     EVENTS, RESULTS_SUBDIRS,
-    get_spike_trains, load_trials_sync, load_sr,
     event_times as event_times_for,
-    add_session_arg, add_save_arg, maybe_save, session_data_dir,
+    add_session_arg, add_save_arg, maybe_save,
 )
 
 
@@ -266,13 +266,12 @@ def parse_args():
 
 
 def main():
-    args     = parse_args()
-    data_dir = session_data_dir(args.session)
+    args   = parse_args()
+    sess   = Session(args.session)
     print(f"Session: {args.session}")
 
-    trains, labels = get_spike_trains(data_dir=data_dir)
-    trials = load_trials_sync(data_dir=data_dir)
-    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
+    trains, labels = sess.spike_trains
+    trials, sr     = sess.trials, sess.sampling_rate
     print(f"Loaded {len(trains)} neurons, {len(trials)} trials, SR={sr} Hz")
     print(f"Workers: {args.jobs or os.cpu_count()} process(es)")
 

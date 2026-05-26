@@ -33,10 +33,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.stats import binomtest
 
+from session import Session
 from utils import (
     RESULTS_SUBDIRS, REPO_ROOT,
-    get_spike_trains, load_trials_sync, load_sr,
-    condition_event_times,
 )
 
 HERE         = Path(REPO_ROOT)
@@ -64,12 +63,10 @@ def discover_sessions():
 
 def session_data(session):
     """Load (sorted) spikes and condition event times for one session."""
-    data_dir = str(HERE / session)
-    trains, _ = get_spike_trains(data_dir=data_dir)
+    sess = Session(session, HERE)
+    trains, _ = sess.spike_trains
     trains = [np.sort(s) for s in trains]
-    trials = load_trials_sync(data_dir=data_dir)
-    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
-    return trains, condition_event_times(trials, sr, event="reward")
+    return trains, sess.condition_event_times(event="reward")
 
 
 def mean_rate(spikes, event_times, t_lo, t_hi):

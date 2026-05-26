@@ -24,7 +24,8 @@ import pandas as pd
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-SESSION  = "20250602"   # default session; override anywhere with --session
+# Kept for CLI defaults. New code: Session(session_id) in analysis scripts.
+SESSION  = "20250602"
 DATA_DIR = os.path.join(REPO_ROOT, SESSION)
 
 MAX_NEURONS = 90        # per-figure cap shared by all plotting scripts

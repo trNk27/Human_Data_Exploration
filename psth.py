@@ -15,10 +15,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
+from session import Session
 from utils import (
     EVENTS, EVENT_STYLE, CONDITIONS,
-    get_spike_trains, load_trials_sync, load_sr,
-    event_times as event_times_for, condition_masks,
     select_neurons, add_session_arg, add_selection_args,
     add_save_arg, maybe_save, handle_list, session_data_dir,
 )
@@ -47,40 +46,24 @@ def compute_psth(spike_times, event_times_s, pre_ms, post_ms, bin_ms):
     return centres_s * 1000, rate
 
 
-def plot_psth(neuron_indices=None, area=None, event="cue",
+def plot_psth(sess, neuron_indices=None, area=None, event="cue",
               pre_ms=500, post_ms=1000, bin_ms=50, sigma_ms=None,
-              by_condition=False, data_dir=None, session=None):
+              by_condition=False):
     """Plot one PSTH subplot per neuron, optionally split by (arm, reward) condition."""
     if event not in EVENTS:
         raise ValueError(f"event must be one of {list(EVENTS)}")
 
-    trains, labels = get_spike_trains(data_dir=data_dir)
+    trains, labels = sess.spike_trains
     trains, labels = select_neurons(trains, labels, indices=neuron_indices, area=area)
 
-    trials = load_trials_sync(data_dir=data_dir)
-    sr     = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
-
-    align_times = event_times_for(trials, sr, event)
-    responding  = trials["NotResponding"].to_numpy() != 1
-    align_times = np.where(responding, align_times, np.nan)
+    align_times = sess.event_times(event)
+    markers     = sess.marker_times_ms(event, pre_ms, post_ms)
 
     cond_masks  = None
     cond_counts = None
     if by_condition:
-        cond_masks  = condition_masks(trials)
+        cond_masks  = sess.condition_masks()
         cond_counts = {name: int(np.sum(m)) for name, m in cond_masks.items()}
-
-    # Mean timing of other events relative to the alignment point (in ms).
-    markers = {}
-    for name in EVENTS:
-        if name == event:
-            continue
-        rel = event_times_for(trials, sr, name) - align_times
-        if not np.any(np.isfinite(rel)):
-            continue
-        mean_rel_ms = float(np.nanmean(rel)) * 1000
-        if -pre_ms <= mean_rel_ms <= post_ms:
-            markers[name] = mean_rel_ms
 
     n     = len(trains)
     ncols = min(n, 4)
@@ -133,7 +116,7 @@ def plot_psth(neuron_indices=None, area=None, event="cue",
     smooth_str = f", smoothed sigma={sigma_ms:.0f} ms" if sigma_ms is not None else ""
     cond_str   = "  |  split by (arm, reward)" if by_condition else ""
     fig.suptitle(
-        f"PSTH — session {session}  |  aligned to: {event}{cond_str}"
+        f"PSTH — session {sess.id}  |  aligned to: {event}{cond_str}"
         f"  (pre={pre_ms}ms, post={post_ms}ms, bin={bin_ms}ms{smooth_str})",
         fontsize=9,
     )
@@ -160,12 +143,13 @@ if __name__ == "__main__":
     if handle_list(args, data_dir=data_dir):
         raise SystemExit
 
+    sess = Session(args.session)
     fig, _ = plot_psth(
+        sess,
         neuron_indices=args.neurons, area=args.area,
         event=args.event, pre_ms=args.pre, post_ms=args.post,
         bin_ms=args.bin, sigma_ms=args.sigma,
         by_condition=args.by_condition,
-        data_dir=data_dir, session=args.session,
     )
     maybe_save(fig, args, prefix="psth")
     plt.show()

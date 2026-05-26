@@ -12,12 +12,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, TextBox
 
+from session import Session
 from utils import (
     EVENTS, EVENT_STYLE,
-    get_spike_trains, load_trials_sync, load_sr,
-    event_times as event_times_for,
     select_neurons, add_session_arg, add_selection_args,
-    session_data_dir,
 )
 from psth import compute_psth
 from autocorrelogram import compute_acg
@@ -30,29 +28,16 @@ _LAG_MS     = 200
 _BIN_ACG_MS = 1
 
 
-def build_browser(neuron_indices=None, area=None, event="cue",
+def build_browser(sess, neuron_indices=None, area=None, event="cue",
                   pre_ms=_PRE_MS, post_ms=_POST_MS, bin_ms=_BIN_MS,
-                  lag_ms=_LAG_MS, bin_acg_ms=_BIN_ACG_MS,
-                  data_dir=None, session=None):
-    trains, labels = get_spike_trains(data_dir=data_dir)
+                  lag_ms=_LAG_MS, bin_acg_ms=_BIN_ACG_MS):
+    trains, labels = sess.spike_trains
     trains, labels = select_neurons(trains, labels,
                                     indices=neuron_indices, area=area,
                                     enforce_cap=False)
 
-    trials      = load_trials_sync(data_dir=data_dir)
-    sr          = load_sr(data_dir=data_dir)["SamplingRate_Hz"].iloc[0]
-    align_times = event_times_for(trials, sr, event)
-
-    # Mean relative timing of other events in ms for PSTH marker lines.
-    markers = {}
-    for name in EVENTS:
-        if name == event:
-            continue
-        rel = event_times_for(trials, sr, name) - align_times
-        if np.any(np.isfinite(rel)):
-            mean_rel_ms = float(np.nanmean(rel)) * 1000
-            if -pre_ms <= mean_rel_ms <= post_ms:
-                markers[name] = mean_rel_ms
+    align_times = sess.event_times(event)
+    markers     = sess.marker_times_ms(event, pre_ms, post_ms)
 
     state = {"idx": 0}
 
@@ -98,7 +83,7 @@ def build_browser(neuron_indices=None, area=None, event="cue",
         ax_acg.tick_params(labelsize=7)
 
         fig.suptitle(
-            f"[{idx} / {len(trains) - 1}]  {labels[idx]}\nSession {session}",
+            f"[{idx} / {len(trains) - 1}]  {labels[idx]}\nSession {sess.id}",
             fontsize=9, y=0.97,
         )
         txt_box.set_val(str(idx))
@@ -150,13 +135,12 @@ if __name__ == "__main__":
                         help=f"ACG max lag in ms (default: {_LAG_MS})")
     args = parser.parse_args()
 
-    data_dir = session_data_dir(args.session)
-
+    sess = Session(args.session)
     build_browser(
+        sess,
         neuron_indices=args.neurons, area=args.area,
         event=args.event,
         pre_ms=args.pre, post_ms=args.post, bin_ms=args.bin,
         lag_ms=args.lag, bin_acg_ms=args.bin_acg,
-        data_dir=data_dir, session=args.session,
     )
     plt.show()
