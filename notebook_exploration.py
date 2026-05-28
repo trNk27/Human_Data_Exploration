@@ -30,6 +30,9 @@ print(f"Neurons  : {len(trains)}")
 print(f"Trials   : {len(sess.trials)}")
 print(f"SR       : {sess.sampling_rate} Hz")
 
+
+
+
 # %% ------------------------------------------------------------------
 # 3. Morning summary — responding trials and condition breakdown
 # ---------------------------------------------------------------------
@@ -39,32 +42,9 @@ print(f"Responding : {mask.sum()} / {len(mask)} trials  "
 for name, times in sess.condition_event_times().items():
     print(f"  {name:5s}  {len(times):4d} trials")
 
-# %% [markdown]
-# ---
-# ## Whole-population views
 
-# %% PSTH — all neurons, aligned to cue
-fig, _ = plot_psth(sess, event="cue", pre_ms=500, post_ms=1500, bin_ms=50,
-                   sigma_ms=80)
-plt.show()
 
-# %% PSTH — split by condition
-fig, _ = plot_psth(sess, event="reward", pre_ms=500, post_ms=1500,
-                   bin_ms=50, sigma_ms=80, by_condition=True)
-plt.show()
 
-# %% Aligned raster — colour-coded by (arm × outcome)
-fig, _ = plot_aligned_raster(sess, event="cue", pre_ms=500, post_ms=1500,
-                              by_condition=True)
-plt.show()
-
-# %% Full-recording raster (zoomed to first 300 s)
-fig, _ = plot_raster(sess, t_start=0, t_end=300)
-plt.show()
-
-# %% [markdown]
-# ---
-# ## Single-neuron deep dive
 
 # %% Pick a neuron and inspect it
 NEURON = 0   # ← change this
@@ -73,6 +53,11 @@ train = trains[NEURON]
 print(f"Neuron   : {NEURON}  —  {labels[NEURON]}")
 print(f"Spikes   : {len(train)}")
 print(f"Mean FR  : {len(train) / (train[-1] - train[0]):.2f} Hz")
+
+
+
+
+
 
 # %% Single-neuron PSTH (manual, no subplot grid)
 cue_times = sess.event_times("cue")
