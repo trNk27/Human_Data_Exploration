@@ -17,11 +17,15 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import utils
+from session import Session
 from psth import plot_psth, EVENTS
 from raster_plot import plot_raster, plot_aligned_raster
 from autocorrelogram import plot_acg
+from firing_rate_vs_perc_p import plot_fr_vs_perc_p, WINDOWS, WINDOW_LABELS
 
 DATA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+PLOT_TYPES = ["PSTH", "Raster", "Aligned Raster", "ACG", "FR vs Perceived P"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,14 +40,22 @@ def available_sessions():
     )
 
 
+@st.cache_resource
+def load_session(session_id: str) -> Session:
+    """Load and cache a Session object (spike trains etc.) per session ID."""
+    return Session(session_id, data_root=DATA_ROOT)
+
+
 @st.cache_data
-def cached_labels(session):
-    """Load neuron labels for a session (cached per session)."""
-    _, labels = utils.get_spike_trains(data_dir=os.path.join(DATA_ROOT, session))
+def cached_labels(session: str) -> list[str]:
+    """Neuron labels for a session (cached per session ID)."""
+    _, labels = utils.get_spike_trains(
+        data_dir=os.path.join(DATA_ROOT, session)
+    )
     return labels
 
 
-def extract_areas(labels):
+def extract_areas(labels: list[str]) -> list[str]:
     areas = set()
     for lbl in labels:
         if "|" in lbl:
@@ -54,7 +66,7 @@ def extract_areas(labels):
     return sorted(areas)
 
 
-def fig_to_png(fig):
+def fig_to_png(fig) -> bytes:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     buf.seek(0)
@@ -79,9 +91,7 @@ with st.sidebar:
         st.stop()
     session = st.selectbox("Session", sessions, index=len(sessions) - 1)
 
-    # Point utils globals at the selected session.
-    # DATA_DIR is referenced inside loader functions via the utils module namespace,
-    # so this update is seen on the next call even for names imported with 'from'.
+    # Keep utils globals in sync (needed by plot_acg which reads utils.DATA_DIR)
     utils.SESSION  = session
     utils.DATA_DIR = os.path.join(DATA_ROOT, session)
 
@@ -111,7 +121,7 @@ with st.sidebar:
 
     # Plot type
     st.header("Plot type")
-    plot_type = st.radio("Graph", ["PSTH", "Raster", "Aligned Raster", "ACG"])
+    plot_type = st.radio("Graph", PLOT_TYPES)
 
     # Parameters
     st.header("Parameters")
@@ -121,9 +131,9 @@ with st.sidebar:
         pre_ms   = st.slider("Pre-event (ms)",  100, 2000, 500,  50)
         post_ms  = st.slider("Post-event (ms)", 100, 2000, 1000, 50)
         bin_ms   = st.slider("Bin size (ms)",     5,  200,  50,   5)
-        sig_raw  = st.slider("Smoothing σ ms (0 = off)", 0, 200, 0, 5)
+        sig_raw  = st.slider("Smoothing sigma ms (0 = off)", 0, 200, 0, 5)
         sigma_ms = sig_raw if sig_raw > 0 else None
-        by_cond  = st.checkbox("Split by condition (arm × reward)")
+        by_cond  = st.checkbox("Split by condition (arm x reward)")
 
     elif plot_type == "Raster":
         use_win = st.checkbox("Limit time window")
@@ -134,14 +144,26 @@ with st.sidebar:
             t_start = t_end = None
 
     elif plot_type == "Aligned Raster":
-        event    = st.selectbox("Align to", list(EVENTS.keys()))
-        pre_ms   = st.slider("Pre-event (ms)",  100, 2000, 500,  50)
-        post_ms  = st.slider("Post-event (ms)", 100, 2000, 1000, 50)
-        by_cond  = st.checkbox("Colour by condition (arm × reward)")
+        event   = st.selectbox("Align to", list(EVENTS.keys()))
+        pre_ms  = st.slider("Pre-event (ms)",  100, 2000, 500,  50)
+        post_ms = st.slider("Post-event (ms)", 100, 2000, 1000, 50)
+        by_cond = st.checkbox("Colour by condition (arm x reward)")
 
     elif plot_type == "ACG":
         lag_ms = st.slider("Max lag (ms)",  50, 1000, 200, 10)
         bin_ms = st.slider("Bin size (ms)",  1,   20,   1,  1)
+
+    elif plot_type == "FR vs Perceived P":
+        fr_window  = st.selectbox(
+            "Firing-rate window",
+            options=list(WINDOWS),
+            format_func=lambda k: WINDOW_LABELS[k],
+        )
+        fr_history = st.slider(
+            "Reward history (trials)", 3, 30, 10,
+            help="Number of past responding trials used to estimate P(reward)",
+        )
+        fr_bins    = st.slider("Probability bins", 4, 15, 8)
 
     st.divider()
     run = st.button("Plot", type="primary", use_container_width=True)
@@ -155,9 +177,12 @@ if "fig_bytes" not in st.session_state:
 if run:
     plt.close("all")
     try:
-        with st.spinner("Computing…"):
+        with st.spinner("Computing..."):
+            sess = load_session(session)
+
             if plot_type == "PSTH":
                 fig, _ = plot_psth(
+                    sess,
                     neuron_indices=neuron_indices,
                     area=area_filter,
                     event=event,
@@ -169,6 +194,7 @@ if run:
                 )
             elif plot_type == "Raster":
                 fig, _ = plot_raster(
+                    sess,
                     t_start=t_start,
                     t_end=t_end,
                     neuron_indices=neuron_indices,
@@ -176,6 +202,7 @@ if run:
                 )
             elif plot_type == "Aligned Raster":
                 fig, _ = plot_aligned_raster(
+                    sess,
                     neuron_indices=neuron_indices,
                     area=area_filter,
                     event=event,
@@ -189,9 +216,22 @@ if run:
                     area=area_filter,
                     lag_ms=lag_ms,
                     bin_ms=bin_ms,
+                    data_dir=os.path.join(DATA_ROOT, session),
                 )
+            elif plot_type == "FR vs Perceived P":
+                fig, _ = plot_fr_vs_perc_p(
+                    sess,
+                    neuron_indices=neuron_indices,
+                    area=area_filter,
+                    window=fr_window,
+                    history=fr_history,
+                    n_bins=fr_bins,
+                )
+
         st.session_state.fig_bytes = fig_to_png(fig)
-        st.session_state.fig_name  = f"{plot_type.lower().replace(' ', '_')}_{session}.png"
+        st.session_state.fig_name  = (
+            f"{plot_type.lower().replace(' ', '_')}_{session}.png"
+        )
         plt.close(fig)
     except ValueError as exc:
         st.error(str(exc))
@@ -202,7 +242,7 @@ if run:
 if st.session_state.fig_bytes:
     st.image(st.session_state.fig_bytes, use_column_width=True)
     st.download_button(
-        "⬇ Download PNG",
+        "Download PNG",
         data=st.session_state.fig_bytes,
         file_name=st.session_state.fig_name,
         mime="image/png",
