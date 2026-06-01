@@ -38,6 +38,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import chi2_contingency
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import EVENTS, RESULTS_SUBDIRS
 
 # label format: "unit73 | AG ele059 (su)"  ->  region = "AG"

@@ -2,23 +2,29 @@
 
 Shows a PSTH (top) and autocorrelogram (bottom) for one neuron at a time.
 Navigate with Prev / Next buttons, arrow keys, or type a neuron index directly.
+The two panels reuse `explore.draw_psth` / `explore.draw_acg`.
 
 All time parameters are in milliseconds.
+
+    python -m viewers.browser --session 20250714 --event reward
 """
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
 
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, TextBox
 
 from session import Session
+from explore import draw_psth, draw_acg
 from utils import (
-    EVENTS, EVENT_STYLE,
-    select_neurons, add_session_arg, add_selection_args,
+    EVENTS, select_neurons,
+    add_session_arg, add_selection_args,
 )
-from psth import compute_psth
-from autocorrelogram import compute_acg
 
 # Defaults — override via CLI
 _PRE_MS     = 500
@@ -35,9 +41,6 @@ def build_browser(sess, neuron_indices=None, area=None, event="cue",
     trains, labels = select_neurons(trains, labels,
                                     indices=neuron_indices, area=area,
                                     enforce_cap=False)
-
-    align_times = sess.event_times(event)
-    markers     = sess.marker_times_ms(event, pre_ms, post_ms)
 
     state = {"idx": 0}
 
@@ -59,28 +62,15 @@ def build_browser(sess, neuron_indices=None, area=None, event="cue",
         ax_psth.cla()
         ax_acg.cla()
 
-        train = trains[idx]
+        train, label = trains[idx], labels[idx]
 
-        centres, rate = compute_psth(train, align_times, pre_ms, post_ms, bin_ms)
-        ax_psth.bar(centres, rate, width=bin_ms, color="steelblue", edgecolor="none", alpha=0.6)
-        ax_psth.axvline(0, color="red", linewidth=1.0, linestyle="--",
-                        label=f"{EVENTS[event]['label']} (align)")
-        for name, t_rel_ms in markers.items():
-            ax_psth.axvline(t_rel_ms, linewidth=0.8,
-                            label=EVENTS[name]["label"], **EVENT_STYLE[name])
-        ax_psth.set_xlabel("Time rel. to event (ms)", fontsize=8)
-        ax_psth.set_ylabel("Firing rate (Hz)", fontsize=8)
+        draw_psth(ax_psth, sess, train, label, align=event,
+                  pre_ms=pre_ms, post_ms=post_ms, bin_ms=bin_ms)
         ax_psth.set_title(f"PSTH — aligned to: {event}", fontsize=8)
         ax_psth.legend(fontsize=6, loc="upper right")
-        ax_psth.tick_params(labelsize=7)
 
-        c_acg, cnt = compute_acg(train, lag_ms=lag_ms, bin_ms=bin_acg_ms)
-        ax_acg.bar(c_acg, cnt, width=bin_acg_ms, color="steelblue", edgecolor="none")
-        ax_acg.axvline(0, color="red", linewidth=0.8, linestyle="--")
-        ax_acg.set_xlabel("Lag (ms)", fontsize=8)
-        ax_acg.set_ylabel("Count", fontsize=8)
+        draw_acg(ax_acg, sess, train, label, lag_ms=lag_ms, bin_ms=bin_acg_ms)
         ax_acg.set_title(f"Autocorrelogram (+/-{lag_ms} ms, bin {bin_acg_ms} ms)", fontsize=8)
-        ax_acg.tick_params(labelsize=7)
 
         fig.suptitle(
             f"[{idx} / {len(trains) - 1}]  {labels[idx]}\nSession {sess.id}",

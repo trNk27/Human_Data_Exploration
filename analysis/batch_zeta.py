@@ -34,6 +34,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import REPO_ROOT, RESULTS_DIR
 
 HERE = Path(REPO_ROOT)
@@ -137,7 +140,7 @@ def main():
                 script_args = responsiveness_overrides + script_args
             print(f"  -- {name}: {cfg['script']} {' '.join(script_args)} --", flush=True)
             result = subprocess.run(
-                [sys.executable, str(HERE / cfg["script"]),
+                [sys.executable, str(HERE / "analysis" / cfg["script"]),
                  "--session", session, *script_args, *extra],
                 env=env,
             )

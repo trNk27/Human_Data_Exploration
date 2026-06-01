@@ -32,6 +32,11 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from session import Session
 from utils import CONDITIONS, add_session_arg, add_save_arg, maybe_save
 

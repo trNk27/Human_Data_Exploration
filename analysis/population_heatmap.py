@@ -21,7 +21,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
-from psth import compute_psth
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from compute import compute_psth
 from session import Session
 from utils import (
     EVENT_STYLE,

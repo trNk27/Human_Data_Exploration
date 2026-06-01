@@ -9,6 +9,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import REPO_ROOT
 
 DONE = {"20250521", "20250602"}
@@ -35,7 +39,7 @@ def main():
     for session in sessions:
         print(f"=== {session} ===")
         result = subprocess.run(
-            [sys.executable, str(HERE / "export_acg.py"), "--session", session],
+            [sys.executable, str(HERE / "analysis" / "export_acg.py"), "--session", session],
             cwd=str(HERE),
         )
         if result.returncode != 0:

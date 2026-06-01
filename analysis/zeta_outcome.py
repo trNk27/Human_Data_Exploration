@@ -43,6 +43,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from zetapy import zetatest2
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from session import Session
 from utils import (
     RESULTS_SUBDIRS,

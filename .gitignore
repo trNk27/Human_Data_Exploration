@@ -6,3 +6,5 @@
 *.png
 # papers - just for claude to learn
 *.pdf
+# python bytecode cache
+__pycache__/

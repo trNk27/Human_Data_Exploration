@@ -18,14 +18,25 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import utils
 from session import Session
-from psth import plot_psth, EVENTS
-from raster_plot import plot_raster, plot_aligned_raster
-from autocorrelogram import plot_acg
-from firing_rate_vs_perc_p import plot_fr_vs_perc_p, WINDOWS, WINDOW_LABELS
+from explore import grid
+from viewers.raster_plot import plot_raster
+from compute import WINDOWS, WINDOW_LABELS
+from utils import EVENTS, CONDITIONS
 
 DATA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PLOT_TYPES = ["PSTH", "Raster", "Aligned Raster", "ACG", "FR vs Perceived P"]
+
+# Condition filter shared by PSTH / Aligned Raster (maps to grid's `condition`).
+COND_CHOICES = [None, "G+R", "G+N", "S+R", "all"]
+
+
+def cond_label(c):
+    if c is None:
+        return "All responding trials"
+    if c == "all":
+        return "Overlay 3 conditions"
+    return CONDITIONS[c]["label"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,10 +102,6 @@ with st.sidebar:
         st.stop()
     session = st.selectbox("Session", sessions, index=len(sessions) - 1)
 
-    # Keep utils globals in sync (needed by plot_acg which reads utils.DATA_DIR)
-    utils.SESSION  = session
-    utils.DATA_DIR = os.path.join(DATA_ROOT, session)
-
     # Neuron selection
     st.header("Neurons")
     labels = cached_labels(session)
@@ -133,7 +140,7 @@ with st.sidebar:
         bin_ms   = st.slider("Bin size (ms)",     5,  200,  50,   5)
         sig_raw  = st.slider("Smoothing sigma ms (0 = off)", 0, 200, 0, 5)
         sigma_ms = sig_raw if sig_raw > 0 else None
-        by_cond  = st.checkbox("Split by condition (arm x reward)")
+        condition = st.selectbox("Condition", COND_CHOICES, format_func=cond_label)
 
     elif plot_type == "Raster":
         use_win = st.checkbox("Limit time window")
@@ -147,7 +154,7 @@ with st.sidebar:
         event   = st.selectbox("Align to", list(EVENTS.keys()))
         pre_ms  = st.slider("Pre-event (ms)",  100, 2000, 500,  50)
         post_ms = st.slider("Post-event (ms)", 100, 2000, 1000, 50)
-        by_cond = st.checkbox("Colour by condition (arm x reward)")
+        condition = st.selectbox("Condition", COND_CHOICES, format_func=cond_label)
 
     elif plot_type == "ACG":
         lag_ms = st.slider("Max lag (ms)",  50, 1000, 200, 10)
@@ -181,17 +188,12 @@ if run:
             sess = load_session(session)
 
             if plot_type == "PSTH":
-                fig, _ = plot_psth(
-                    sess,
-                    neuron_indices=neuron_indices,
-                    area=area_filter,
-                    event=event,
-                    pre_ms=pre_ms,
-                    post_ms=post_ms,
-                    bin_ms=bin_ms,
-                    sigma_ms=sigma_ms,
-                    by_condition=by_cond,
-                )
+                fig = grid(
+                    sess, "psth",
+                    neurons=neuron_indices, area=area_filter,
+                    align=event, pre_ms=pre_ms, post_ms=post_ms,
+                    bin_ms=bin_ms, sigma_ms=sigma_ms, condition=condition,
+                ).fig
             elif plot_type == "Raster":
                 fig, _ = plot_raster(
                     sess,
@@ -201,32 +203,24 @@ if run:
                     area=area_filter,
                 )
             elif plot_type == "Aligned Raster":
-                fig, _ = plot_aligned_raster(
-                    sess,
-                    neuron_indices=neuron_indices,
-                    area=area_filter,
-                    event=event,
-                    pre_ms=pre_ms,
-                    post_ms=post_ms,
-                    by_condition=by_cond,
-                )
+                fig = grid(
+                    sess, "raster",
+                    neurons=neuron_indices, area=area_filter,
+                    align=event, pre_ms=pre_ms, post_ms=post_ms,
+                    condition=condition,
+                ).fig
             elif plot_type == "ACG":
-                fig, _ = plot_acg(
-                    neuron_indices=neuron_indices,
-                    area=area_filter,
-                    lag_ms=lag_ms,
-                    bin_ms=bin_ms,
-                    data_dir=os.path.join(DATA_ROOT, session),
-                )
+                fig = grid(
+                    sess, "acg",
+                    neurons=neuron_indices, area=area_filter,
+                    lag_ms=lag_ms, bin_ms=bin_ms,
+                ).fig
             elif plot_type == "FR vs Perceived P":
-                fig, _ = plot_fr_vs_perc_p(
-                    sess,
-                    neuron_indices=neuron_indices,
-                    area=area_filter,
-                    window=fr_window,
-                    history=fr_history,
-                    n_bins=fr_bins,
-                )
+                fig = grid(
+                    sess, "fr_vs_p",
+                    neurons=neuron_indices, area=area_filter,
+                    window=fr_window, history=fr_history, n_bins=fr_bins,
+                ).fig
 
         st.session_state.fig_bytes = fig_to_png(fig)
         st.session_state.fig_name  = (

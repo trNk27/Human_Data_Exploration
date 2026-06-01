@@ -133,7 +133,36 @@ run from the repo root.
   need `zetapy` (`pip install zetapy`).
 - Conda is the environment manager (see `.vscode/settings.json`); the project
   environment is `humandata`.
-- Run any script directly: `python <script>.py [arguments]`.
+- Run any script directly: `python <script>.py [arguments]` (from the repo root).
+
+## Code structure
+
+- **Foundation (top level):** `utils.py` (loaders, `EVENTS`/`CONDITIONS`, selection + save helpers), `session.py` (`Session` — lazy/cached per-session data; `Session.neuron(i)`), `compute.py` (pure kernels — `compute_psth`, `compute_acg`, …), `explore.py` (single-neuron `draw_*`, `NeuronView`, auto-saving `Panel`, and `grid()`).
+- **`viewers/`** — multi-neuron grid CLIs, thin wrappers over `explore.grid`: `psth.py`, `raster_plot.py`, `autocorrelogram.py`, `firing_rate_vs_perc_p.py`, `browser.py`.
+- **`analysis/`** — aggregate / population / behavioural analyses: `zeta_analysis.py`, `zeta_outcome.py`, `batch_zeta.py`, `population_heatmap.py`, `responsive_region.py`, `outcome_direction.py`, `choice_timeline.py`, `behavioural_simulation.py`, `export_acg.py`, `batch_export_acg.py`.
+- **`ui/app.py`** — Streamlit explorer. **`scripts/`** — one-offs (`mat_to_csv.py`, `generate_test_data.py`, smoke checks). **`file_explorer.py`** stays at the repo root.
+
+**Running the CLIs.** The per-tool examples below name the bare file (e.g. `psth.py`). Plotting tools live in `viewers/` and analyses in `analysis/` — run them as `python -m viewers.psth …` (or `python viewers/psth.py …`), and `python -m analysis.population_heatmap …`. `file_explorer.py` is at the repo root; `mat_to_csv.py` / `generate_test_data.py` are in `scripts/`.
+
+## Quick start — fluent plotting (one neuron, one condition, save)
+
+```python
+from session import Session
+sess = Session("20250714")
+
+n = sess.neuron(7)                                 # sticky — reuse for several plots
+n.psth(condition="G+R", align="reward").save()     # -> results/figures/20250714/psth_n7_G+R_reward.png
+n.raster(condition="G+N", align="cue").save()
+sess.neuron(12).acg().save()
+sess.neuron(3).fr_vs_p(window="cue_to_reward").save()
+
+from explore import grid                            # many neurons, same draws
+grid(sess, "psth", area="MFG", align="reward", condition="all").save("mfg.png")
+```
+
+`condition`: a `CONDITIONS` key (`"G+R"`/`"G+N"`/`"S+R"`) filters trials to that outcome;
+`None` = all responding trials; `"all"` = overlay the three. `Panel.save()` with no path
+auto-names into `results/figures/<session>/`; pass a path to save elsewhere.
 
 ## Selecting the active session
 
@@ -145,8 +174,8 @@ holding `SR.mat`, `STMtx.mat`, `Trials_Sync.mat` (and optionally
 directory next to the existing ones.
 
 ```
-python psth.py --session 20250605 --event reward
-python browser.py --session 20250710
+python -m viewers.psth --session 20250605 --event reward
+python -m viewers.browser --session 20250710
 ```
 
 The batch scripts iterate sessions internally and pass `--session` through to
@@ -193,11 +222,12 @@ Provides:
 
 ```
 results/
+  figures/<session>/     fluent Panel.save() output (psth_n7_G+R_reward.png, …)
   zeta_responsiveness/   zeta_<event>_<session>.{csv,png}
   zeta_outcome/          zeta2_<contrast>_<session>.{csv,png}
   direction/             direction_<contrast>.png
-acg_export/<session>/    one PNG per neuron (export_acg.py)
-csv/<session>/           .mat -> .csv exports (mat_to_csv.py)
+acg_export/<session>/    one PNG per neuron (analysis/export_acg.py)
+csv/<session>/           .mat -> .csv exports (scripts/mat_to_csv.py)
 ```
 
 ---

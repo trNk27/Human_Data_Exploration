@@ -33,6 +33,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.stats import binomtest
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from session import Session
 from utils import (
     RESULTS_SUBDIRS, REPO_ROOT,

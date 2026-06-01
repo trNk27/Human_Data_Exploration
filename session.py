@@ -90,5 +90,28 @@ class Session:
     def condition_event_times(self, event: str = "reward") -> dict:
         return _condition_event_times(self.trials, self.sampling_rate, event)
 
+    def aligned_event_times(self, align: str, condition: str | None = None) -> np.ndarray:
+        """Event times (s) to align on, optionally filtered to one condition.
+
+        condition=None  -> all responding trials (non-responding are NaN and are
+                           skipped by the downstream compute_* functions).
+        condition=<key> -> only trials in that CONDITIONS key (e.g. "G+R").
+        """
+        times = self.event_times(align)
+        if condition is None:
+            return times
+        masks = self.condition_masks()
+        if condition not in masks:
+            raise ValueError(f"condition must be None or one of {list(masks)}")
+        return times[masks[condition]]
+
+    def neuron(self, idx: int):
+        """Return a NeuronView — the fluent single-neuron plotting entry point.
+
+            sess.neuron(7).psth(condition="G+R", align="reward").save()
+        """
+        from explore import NeuronView   # lazy: explore imports Session
+        return NeuronView(self, idx)
+
     def __repr__(self) -> str:
         return f"Session(id={self.id!r})"

@@ -12,11 +12,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from session import Session
-from utils import EVENTS, EVENT_STYLE, select_neurons, REPO_ROOT
-from psth import compute_psth, plot_psth
-from raster_plot import plot_raster, plot_aligned_raster
-from browser import build_browser
-from autocorrelogram import compute_acg
+from explore import grid                # multi-neuron grids
+from utils import EVENTS, select_neurons, REPO_ROOT
+from viewers.browser import build_browser
+# For ad-hoc cells you can also: from compute import compute_psth, compute_acg
 
 # %% ------------------------------------------------------------------
 # 2. Load session — change SESSION_ID to switch
@@ -59,32 +58,19 @@ print(f"Mean FR  : {len(train) / (train[-1] - train[0]):.2f} Hz")
 
 
 
-# %% Single-neuron PSTH (manual, no subplot grid)
-cue_times = sess.event_times("cue")
-centres, rate = compute_psth(train, cue_times, pre_ms=500, post_ms=1500, bin_ms=50)
-
-fig, ax = plt.subplots(figsize=(7, 3))
-ax.bar(centres, rate, width=50, color="steelblue", edgecolor="none", alpha=0.7)
-ax.axvline(0, color="red", lw=1.0, ls="--", label="Cue")
-for name, t_ms in sess.marker_times_ms("cue", 500, 1500).items():
-    ax.axvline(t_ms, label=EVENTS[name]["label"], **EVENT_STYLE[name], lw=0.8)
-ax.set_xlabel("Time rel. to cue (ms)")
-ax.set_ylabel("Firing rate (Hz)")
-ax.set_title(f"Neuron {NEURON}  —  {labels[NEURON]}")
-ax.legend(fontsize=7)
-plt.tight_layout()
-plt.show()
+# %% Single-neuron plots — the fluent API (one neuron, one condition, save)
+# `sess.neuron(i)` is sticky: fire several plots for the same unit. `.save()`
+# auto-names into results/figures/<session>/; `.show()` displays it.
+n = sess.neuron(NEURON)
+n.psth(align="cue", pre_ms=500, post_ms=1500).show()      # all responding trials
+n.psth(condition="G+R", align="reward").save()            # only gamble + rewarded
+n.raster(condition="G+N", align="cue").show()
 
 # %% Autocorrelogram for the same neuron
-c_acg, cnt = compute_acg(train, lag_ms=200, bin_ms=1)
-fig, ax = plt.subplots(figsize=(7, 3))
-ax.bar(c_acg, cnt, width=1, color="steelblue", edgecolor="none")
-ax.axvline(0, color="red", lw=0.8, ls="--")
-ax.set_xlabel("Lag (ms)")
-ax.set_ylabel("Spike count")
-ax.set_title(f"ACG — neuron {NEURON}")
-plt.tight_layout()
-plt.show()
+sess.neuron(NEURON).acg(lag_ms=200, bin_ms=1).show()
+
+# %% Many neurons at once — the same draws tiled into a grid
+grid(sess, "psth", neurons=[0, 1, 2, 3], align="reward", condition="all").show()
 
 # %% [markdown]
 # ---

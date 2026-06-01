@@ -12,11 +12,15 @@ import matplotlib
 matplotlib.use("Agg")  # no display needed
 import matplotlib.pyplot as plt
 
+# Make the repo root importable when run as `python analysis/<file>.py`.
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import (
     REPO_ROOT, get_spike_trains,
     add_session_arg, session_data_dir,
 )
-from autocorrelogram import compute_acg
+from compute import compute_acg
 
 BIN_MS = 1
 LAGS   = (75, 300)

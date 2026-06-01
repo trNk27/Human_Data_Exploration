@@ -13,7 +13,9 @@ import os
 import numpy as np
 import scipy.io
 
-OUT_DIR = os.path.join(os.path.dirname(__file__), "test_session")
+# Write test_session/ at the repo root (this script lives in scripts/).
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT_DIR = os.path.join(REPO_ROOT, "test_session")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 rng = np.random.default_rng(42)
