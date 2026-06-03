@@ -1,13 +1,22 @@
 """choice_timeline.py — Participant decisions + Rescorla-Wagner model comparison.
 
+Two modes share one RW + softmax engine (see run_rw_model):
+  shadow   — the model *observes* the participant: it predicts each choice but
+             learns from the participant's real choice & reward. Match rate is
+             genuine prediction accuracy. (default; used by fit_rw.py)
+  simulate — the model *free-runs*: it samples its own choices from P(Gamble)
+             and its own rewards from the trial's reward probabilities. It
+             drifts from the participant, so match rate is a behavioural
+             comparison of two independent agents, not a fit metric.
+
 Layout (top → bottom)
 ---------------------
   [Participant]
     Gamble row : orange ticks — bright = rewarded, muted = unrewarded
     Safe   row : green  ticks — bright = rewarded, muted = unrewarded
 
-  [RW Model  (α, β)]
-    Gamble row : same colour scheme, but drawn from the model's predicted choice
+  [RW Model  (α, β, φ) — shadow | simulate]
+    Gamble row : same colour scheme, drawn from the model's predicted/own choice
     Safe   row :   "
     P(Gamble)  : thin black line overlaid on the model gamble row
 
@@ -19,7 +28,8 @@ Usage
 -----
     python choice_timeline.py
     python choice_timeline.py --session 20250602
-    python choice_timeline.py --alpha 0.15 --beta 4 --window 20
+    python choice_timeline.py --alpha 0.15 --beta 4 --phi 1.0 --window 20
+    python choice_timeline.py --mode simulate --phi 1.0 --seed 42
     python choice_timeline.py --save
 """
 
@@ -68,36 +78,73 @@ def run_rw_model(
     trials,
     alpha: float = 0.1,
     beta: float = 5.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Trial-by-trial Rescorla-Wagner model with softmax decision rule.
+    phi: float = 0.0,
+    mode: str = "shadow",
+    rng: np.random.Generator | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Trial-by-trial Rescorla-Wagner model with softmax + perseveration.
 
-    The model observes the *participant's* actual choices and outcomes to
-    update its Q values. Predictions are generated *before* each outcome.
+    One RW + softmax engine, two modes that differ only in where each trial's
+    choice and reward come from:
+
+    mode="shadow"  (default) — *observer*. The model watches the participant:
+        its predicted choice is argmax P(Gamble), but its Q-values are always
+        updated from the *participant's* actual choice and reward. Match rate
+        against the participant is genuine prediction accuracy, and this is the
+        mode used for likelihood fitting (fit_rw.py).
+
+    mode="simulate" — *generative*. The model makes its own choices by sampling
+        P(Gamble), samples its own reward from the trial's reward probabilities,
+        and updates Q from its own choice and reward. It drifts away from the
+        participant's trajectory, so the match rate is a behavioural comparison
+        of two independent agents — NOT a goodness-of-fit measure.
+
+    The perseveration term C_t uses the previous choice of whichever agent
+    drives the updates: the participant (shadow) or the model itself (simulate).
+
+        P(Gamble) = σ( β·(Q_G − Q_S) + φ·C_t )
+        C_t = +1 if that previous choice was Gamble, -1 if Safe, 0 on trial 1.
+    φ > 0 → sticky (repeat last choice); φ < 0 → alternating.
 
     Parameters
     ----------
     trials : pd.DataFrame  (Trials_Sync columns)
     alpha  : learning rate  ∈ (0, 1)
     beta   : inverse temperature (higher → more deterministic)
+    phi    : perseveration strength (0 = no perseveration bias)
+    mode   : "shadow" (observe participant) or "simulate" (free-run)
+    rng    : np.random.Generator for "simulate" (created if None)
 
     Returns
     -------
-    model_choice : (n_trials,) float  1=Gamble, 0=Safe, NaN=non-responding
-    p_gamble     : (n_trials,) float  P(Gamble) at each trial,   NaN=non-responding
-    q_gamble     : (n_trials,) float  Q(Gamble) before update,   NaN=non-responding
-    q_safe       : (n_trials,) float  Q(Safe)   before update,   NaN=non-responding
+    model_choice  : (n_trials,) float  1=Gamble, 0=Safe, NaN=non-responding
+    p_gamble      : (n_trials,) float  P(Gamble) at each trial,   NaN=non-responding
+    q_gamble      : (n_trials,) float  Q(Gamble) before update,   NaN=non-responding
+    q_safe        : (n_trials,) float  Q(Safe)   before update,   NaN=non-responding
+    model_rewards : (n_trials,) float  reward on the model row — the participant's
+                    reward (shadow) or the model's sampled reward (simulate)
     """
+    if mode not in ("shadow", "simulate"):
+        raise ValueError(f"mode must be 'shadow' or 'simulate', got {mode!r}")
+    if mode == "simulate" and rng is None:
+        rng = np.random.default_rng()
+
     n          = len(trials)
     arm        = trials["ChosenArm_G1S0"].to_numpy()       # participant's choice
     rew        = trials["Rewarded"].to_numpy()
     responding = (trials["NotResponding"] == 0).to_numpy()
+    if mode == "simulate":
+        p_big   = trials["P_BigReward_Gamble"].to_numpy()  # reward prob if Gamble
+        p_small = trials["P_SmallReward_Safe"].to_numpy()  # reward prob if Safe
 
     q = {1: 0.5, 0: 0.5}   # Q-values: gamble=1, safe=0
+    last_choice = None       # previous responding choice of the driving agent
 
-    model_choice = np.full(n, np.nan)
-    p_gamble     = np.full(n, np.nan)
-    q_gamble     = np.full(n, np.nan)
-    q_safe       = np.full(n, np.nan)
+    model_choice  = np.full(n, np.nan)
+    p_gamble      = np.full(n, np.nan)
+    q_gamble      = np.full(n, np.nan)
+    q_safe        = np.full(n, np.nan)
+    model_rewards = np.full(n, np.nan)
 
     for t in range(n):
         if not responding[t]:
@@ -107,16 +154,32 @@ def run_rw_model(
         q_gamble[t] = q[1]
         q_safe[t]   = q[0]
 
-        # Softmax: P(Gamble) = σ( β · (Q_G − Q_S) )
-        p_g = 1.0 / (1.0 + np.exp(-beta * (q[1] - q[0])))
-        p_gamble[t]     = p_g
-        model_choice[t] = 1.0 if p_g >= 0.5 else 0.0
+        # Perseveration signal: +1 = last was Gamble, -1 = last was Safe, 0 = first trial
+        if last_choice is None:
+            c_t = 0.0
+        else:
+            c_t = 1.0 if last_choice == 1 else -1.0
 
-        # Update: participant's chosen arm, participant's observed reward
-        chosen = int(arm[t])
-        q[chosen] += alpha * (float(rew[t]) - q[chosen])
+        # Softmax: P(Gamble) = σ( β·(Q_G − Q_S) + φ·C_t )
+        p_g = 1.0 / (1.0 + np.exp(-beta * (q[1] - q[0]) - phi * c_t))
+        p_gamble[t] = p_g
 
-    return model_choice, p_gamble, q_gamble, q_safe
+        if mode == "shadow":
+            # Predict, but learn from the participant's real choice & reward.
+            model_choice[t] = 1.0 if p_g >= 0.5 else 0.0
+            chosen          = int(arm[t])
+            reward          = float(rew[t])
+        else:  # simulate — make and learn from the model's own choice & reward
+            chosen          = int(rng.random() < p_g)
+            reward_prob     = p_big[t] if chosen == 1 else p_small[t]
+            reward          = float(rng.random() < reward_prob)
+            model_choice[t] = float(chosen)
+
+        model_rewards[t] = reward
+        q[chosen] += alpha * (reward - q[chosen])
+        last_choice = chosen
+
+    return model_choice, p_gamble, q_gamble, q_safe, model_rewards
 
 
 # ---------------------------------------------------------------------------
@@ -162,19 +225,23 @@ def plot_choice_timeline(
     sess: Session,
     alpha: float = 0.1,
     beta: float = 5.0,
+    phi: float = 0.0,
     window: int = 20,
+    mode: str = "shadow",
+    rng: np.random.Generator | None = None,
 ):
-    """Build and return the 5-row figure."""
+    """Build and return the 5-row figure (shadow or simulate mode)."""
     trials     = sess.trials
     responding = sess.responding_mask
     arm        = trials["ChosenArm_G1S0"].to_numpy()
     rew        = trials["Rewarded"].to_numpy()
     n_trials   = len(trials)
     idx        = np.arange(n_trials)
+    is_sim     = (mode == "simulate")
 
     # ---- Run model ----------------------------------------------------
-    model_choice, p_gamble, _, _ = run_rw_model(
-        trials, alpha=alpha, beta=beta,
+    model_choice, p_gamble, _, _, model_rewards = run_rw_model(
+        trials, alpha=alpha, beta=beta, phi=phi, mode=mode, rng=rng,
     )
     roll_rate, match_arr = rolling_match(arm, model_choice, window=window)
     overall_acc = float(np.nanmean(match_arr))
@@ -191,12 +258,14 @@ def plot_choice_timeline(
     p_sr = responding & (arm == 0) & (rew == 1)
     p_sn = responding & (arm == 0) & (rew == 0)
 
-    # ---- Model masks (model's predicted choice × actual outcome) -----
+    # ---- Model masks (model's choice × its row's outcome) ------------
+    # In shadow mode model_rewards is the participant's reward; in simulate
+    # mode it is the model's own sampled reward.
     model_resp = ~np.isnan(model_choice)
-    m_gr = model_resp & (model_choice == 1) & (rew == 1)
-    m_gn = model_resp & (model_choice == 1) & (rew == 0)
-    m_sr = model_resp & (model_choice == 0) & (rew == 1)
-    m_sn = model_resp & (model_choice == 0) & (rew == 0)
+    m_gr = model_resp & (model_choice == 1) & (model_rewards == 1)
+    m_gn = model_resp & (model_choice == 1) & (model_rewards == 0)
+    m_sr = model_resp & (model_choice == 0) & (model_rewards == 1)
+    m_sn = model_resp & (model_choice == 0) & (model_rewards == 0)
 
     # ---- Figure layout ------------------------------------------------
     fig = plt.figure(figsize=(15, 8))
@@ -252,14 +321,15 @@ def plot_choice_timeline(
     tick_row(ax_ps, p_safe_rows, ylabel="Safe")
 
     # ---- Draw model rows ---------------------------------------------
+    verb = "Chose" if is_sim else "Predicts"
     tick_row(ax_mg, [
-        (idx[m_gr], col_gr, f"Predicts G, rewarded  (n={m_gr.sum()})"),
-        (idx[m_gn], col_gn, f"Predicts G, unrewarded (n={m_gn.sum()})"),
+        (idx[m_gr], col_gr, f"{verb} G, rewarded  (n={m_gr.sum()})"),
+        (idx[m_gn], col_gn, f"{verb} G, unrewarded (n={m_gn.sum()})"),
     ], ylabel="Gamble")
 
-    m_safe_rows = [(idx[m_sr], col_sr, f"Predicts S, rewarded  (n={m_sr.sum()})")]
+    m_safe_rows = [(idx[m_sr], col_sr, f"{verb} S, rewarded  (n={m_sr.sum()})")]
     if m_sn.sum():
-        m_safe_rows.append((idx[m_sn], col_sn, f"Predicts S, unrewarded (n={m_sn.sum()})"))
+        m_safe_rows.append((idx[m_sn], col_sn, f"{verb} S, unrewarded (n={m_sn.sum()})"))
     tick_row(ax_ms, m_safe_rows, ylabel="Safe")
 
     # Overlay P(Gamble) line on model gamble row
@@ -276,7 +346,7 @@ def plot_choice_timeline(
     # ---- Section labels (left margin) --------------------------------
     for ax, label in [
         (ax_pg, "Participant"),
-        (ax_mg, f"RW model\nα={alpha}, β={beta}"),
+        (ax_mg, f"RW model ({mode})\nα={alpha}, β={beta}, φ={phi}"),
     ]:
         ax.text(
             -0.055, 0.0, label,
@@ -287,7 +357,7 @@ def plot_choice_timeline(
 
     # ---- Title --------------------------------------------------------
     ax_pg.set_title(
-        f"Decision sequence — session {sess.id}",
+        f"Decision sequence ({mode}) — session {sess.id}",
         fontsize=11, pad=8,
     )
 
@@ -296,8 +366,9 @@ def plot_choice_timeline(
                   label="Chance (50 %)")
     ax_al.plot(idx, roll_rate, color="steelblue", lw=1.6, zorder=3,
                label=f"Rolling {window}-trial match")
+    acc_word = "match" if is_sim else "accuracy"
     ax_al.axhline(overall_acc, color="steelblue", lw=1.1, ls=":",
-                  alpha=0.85, label=f"Overall accuracy: {overall_acc:.1%}")
+                  alpha=0.85, label=f"Overall {acc_word}: {overall_acc:.1%}")
 
     # Fill: above chance = blue, below = red
     ax_al.fill_between(
@@ -355,16 +426,31 @@ def main():
         help="Softmax inverse temperature, B > 0  (default: 5.0)",
     )
     parser.add_argument(
+        "--phi", type=float, default=0.0, metavar="P",
+        help="Perseveration strength (0 = none, >0 = sticky)  (default: 0.0)",
+    )
+    parser.add_argument(
         "--window", type=int, default=20, metavar="W",
         help="Rolling window size for alignment metric  (default: 20)",
+    )
+    parser.add_argument(
+        "--mode", choices=["shadow", "simulate"], default="shadow",
+        help="shadow = observe participant & predict their choices (default); "
+             "simulate = free-run, sampling the model's own choices and rewards",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, metavar="S",
+        help="RNG seed for --mode simulate (reproducibility)",
     )
     args = parser.parse_args()
 
     sess = Session(args.session)
+    rng  = np.random.default_rng(args.seed)
     fig  = plot_choice_timeline(
-        sess, alpha=args.alpha, beta=args.beta, window=args.window,
+        sess, alpha=args.alpha, beta=args.beta, phi=args.phi,
+        window=args.window, mode=args.mode, rng=rng,
     )
-    maybe_save(fig, args, prefix="choice_timeline")
+    maybe_save(fig, args, prefix=f"choice_timeline_{args.mode}")
     plt.show()
 
 
