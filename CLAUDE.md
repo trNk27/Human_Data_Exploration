@@ -10,6 +10,7 @@ The goal is to analyze the data and gain insights into reward encoding in the hu
 ## Environment
 
 - Python with `scipy`, `numpy`, `pandas`. Env manager is conda (see `.vscode/settings.json`).
+- environment is called `humandata`
 - Run scripts directly: `python file_explorer.py`.
 
 ## Data layout
