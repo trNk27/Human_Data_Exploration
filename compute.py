@@ -22,8 +22,8 @@ WINDOWS = ("trial", "cue_to_reward", "reward_to_end")
 
 WINDOW_LABELS = {
     "trial":         "Full trial (start → end)",
-    "cue_to_reward": "Cue → Reward onset  (rewarded trials only)",
-    "reward_to_end": "Reward onset → Trial end  (rewarded trials only)",
+    "cue_to_reward": "Cue → Reward onset",
+    "reward_to_end": "Reward onset → Trial end",
 }
 
 
@@ -171,11 +171,11 @@ def trial_firing_rates(trains: list, trials, sr: int,
     elif window == "cue_to_reward":
         t0_all = trials["CuePresent_sp"].to_numpy()  / sr
         t1_all = trials["RewardOnset_sp"].to_numpy() / sr
-        valid  = trials["Rewarded"].to_numpy() == 1
+        valid  = np.ones(n_trials, dtype=bool)
     else:  # reward_to_end
         t0_all = trials["RewardOnset_sp"].to_numpy() / sr
         t1_all = trials["TrialEnd_sp"].to_numpy()    / sr
-        valid  = trials["Rewarded"].to_numpy() == 1
+        valid  = np.ones(n_trials, dtype=bool)
 
     if trial_mask is not None:
         valid = valid & trial_mask

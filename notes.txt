@@ -7,3 +7,5 @@ Questions
 -smoothing over how many ms?
 -multiple events per psth how do we do this?
 
+TODO from 03.06.2026
+-check reward sizes and if they are in the matlab file?
