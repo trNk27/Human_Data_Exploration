@@ -41,6 +41,8 @@ if __name__ == "__main__":
                         help="Past-trial window for perceived probability (default: 10)")
     parser.add_argument("--bins", type=int, default=8, metavar="N",
                         help="Number of probability bins for mean overlay (default: 8)")
+    parser.add_argument("--by-condition", action="store_true",
+                        help="Colour points by outcome and fit one regression per condition")
     add_save_arg(parser)
     args = parser.parse_args()
 
@@ -49,6 +51,7 @@ if __name__ == "__main__":
 
     sess  = Session(args.session)
     panel = grid(sess, "fr_vs_p", neurons=args.neurons, area=args.area,
-                 window=args.window, history=args.history, n_bins=args.bins)
+                 window=args.window, history=args.history, n_bins=args.bins,
+                 by_condition=args.by_condition)
     maybe_save(panel.fig, args, prefix="fr_vs_perc_p")
     plt.show()

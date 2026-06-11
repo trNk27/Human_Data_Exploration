@@ -50,7 +50,7 @@ Three layers: a stable **foundation**, a single-neuron **plotting layer**, and t
 | `explore.py` | The single-neuron plotting layer — `draw_*` (one neuron / one axes), `NeuronView`, `Panel` (auto-saving), and `grid()` (tiles the same draws across many neurons). **Import this for exploratory plotting.** |
 | `file_explorer.py` | Interactive data explorer (`python file_explorer.py`). |
 
-**`viewers/`** — multi-neuron grid CLIs, thin wrappers over `explore.grid`: `psth.py`, `raster_plot.py`, `autocorrelogram.py`, `firing_rate_vs_perc_p.py`, `browser.py`.
+**`viewers/`** — multi-neuron grid CLIs, thin wrappers over `explore.grid`: `psth.py`, `raster_plot.py`, `autocorrelogram.py`, `browser.py`, and a family of "firing rate vs per-trial regressor" plots that share one core (`explore._draw_fr_vs_regressor`): `firing_rate_vs_perc_p.py` (x = behavioural rolling P(reward)), `firing_rate_vs_hgf_p.py` (x = HGF latent belief p̂), `firing_rate_vs_delta1.py` (x = HGF prediction error δ₁ = outcome − p̂, gamble trials only). The last two read `results/hgf/trajectory_<session>.csv`. All three accept `by_condition=True` (CLI `--by-condition`, `--pooled` for δ₁) to colour points by outcome (G+R/G+N/S+R) and fit one regression per condition.
 
 **`analysis/`** — aggregate / population / behavioural analyses (one figure or CSV over many neurons/sessions): `zeta_analysis.py`, `zeta_outcome.py`, `batch_zeta.py`, `population_heatmap.py`, `responsive_region.py`, `outcome_direction.py`, `choice_timeline.py`, `behavioural_simulation.py`, `export_acg.py`, `batch_export_acg.py`.
 
@@ -69,6 +69,8 @@ n.psth(condition="G+R", align="reward").save()       # -> results/figures/202507
 n.raster(condition="G+N", align="cue").save()
 sess.neuron(12).acg().save()
 sess.neuron(3).fr_vs_p(window="cue_to_reward").save()
+sess.neuron(3).fr_vs_hgf_p(window="cue_to_reward").save()        # x = HGF latent belief
+sess.neuron(3).fr_vs_delta1(window="cue_to_reward").save()       # x = HGF prediction error δ₁
 
 from explore import grid                              # many neurons, same draws
 grid(sess, "psth", area="ACC", align="reward", condition="all").save("acc.png")

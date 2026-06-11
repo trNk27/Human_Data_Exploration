@@ -139,7 +139,7 @@ python -m analysis.hgf.run --no-hierarchical --n-recovery 8 --n-power 6
 | `scan_fn` single step ≡ full sequence | `scripts/hgf_validate_stepper.py` |
 | Shared MAP fit on real data — sane params + accuracy | `scripts/hgf_test_fit.py` |
 | Parameter recovery r > 0.7 for all params | `results/hgf/parameter_recovery_summary.csv` |
-| Power ≥ 0.8 for Δω₂ ≥ 1.5 | `results/hgf/power_check_summary.csv` |
+| Power: β detectable (power→1.0 at Δβ=1.0); ω₂ underpowered (≤0.6 even at Δω₂=2.0) — see note | `results/hgf/power_check_summary.csv` |
 | HGF ΔBIC vs RW | `results/hgf/model_comparison.csv` |
 | Hierarchical posterior R̂ ≈ 1 | `results/hgf/hierarchical_summary.csv` |
 

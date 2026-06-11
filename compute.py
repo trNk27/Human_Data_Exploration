@@ -199,10 +199,11 @@ def trial_firing_rates(trains: list, trials, sr: int,
     return rates
 
 
-def binned_stats(x: np.ndarray, y: np.ndarray,
-                 n_bins: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Mean and SEM of y in n_bins equal-width bins over [0, 1]."""
-    edges = np.linspace(0.0, 1.0, n_bins + 1)
+def binned_stats(x: np.ndarray, y: np.ndarray, n_bins: int,
+                 lo: float = 0.0, hi: float = 1.0
+                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Mean and SEM of y in n_bins equal-width bins over [lo, hi]."""
+    edges = np.linspace(lo, hi, n_bins + 1)
     cx, mn, se = [], [], []
     for lo, hi in zip(edges[:-1], edges[1:]):
         mask = (x >= lo) & (x < hi) & np.isfinite(y)

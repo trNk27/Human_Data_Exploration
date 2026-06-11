@@ -122,6 +122,41 @@ def load_trials_sync(data_dir=None):
 
 
 # ---------------------------------------------------------------------------
+# HGF results loader  (perceived gamble probability per trial)
+# ---------------------------------------------------------------------------
+
+def load_hgf_trajectory_column(session_id, n_trials, column, results_dir=None):
+    """One HGF trajectory column, scattered onto a length-``n_trials`` array.
+
+    Reads ``results/hgf/trajectory_<session_id>.csv`` (written by
+    ``analysis.hgf.run``) and places ``column`` back onto a per-trial array using
+    ``original_trial_index``. Trials with no HGF estimate (non-responding, or
+    otherwise absent from the trajectory) are NaN.
+
+    Returns ``None`` when no trajectory CSV exists for the session, i.e. the HGF
+    analysis has not been run for it.
+    """
+    results_dir = results_dir or os.path.join(RESULTS_DIR, "hgf")
+    path = os.path.join(results_dir, f"trajectory_{session_id}.csv")
+    if not os.path.exists(path):
+        return None
+    traj = pd.read_csv(path)
+    out = np.full(n_trials, np.nan)
+    idx = traj["original_trial_index"].to_numpy().astype(int)
+    out[idx] = traj[column].to_numpy()
+    return out
+
+
+def load_hgf_perceived_prob(session_id, n_trials, results_dir=None):
+    """Per-trial HGF perceived gamble-reward probability p̂ (the model's latent
+    estimate of P(gamble pays the big reward)). ``None`` if the session has no
+    trajectory CSV. See :func:`load_hgf_trajectory_column`."""
+    return load_hgf_trajectory_column(
+        session_id, n_trials, "perceived_gamble_prob", results_dir
+    )
+
+
+# ---------------------------------------------------------------------------
 # Spike-train and event helpers
 # ---------------------------------------------------------------------------
 

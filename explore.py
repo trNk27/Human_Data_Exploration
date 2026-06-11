@@ -39,7 +39,10 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 
-from utils import EVENTS, EVENT_STYLE, CONDITIONS, select_neurons, RESULTS_DIR
+from utils import (
+    EVENTS, EVENT_STYLE, CONDITIONS, select_neurons, RESULTS_DIR,
+    load_hgf_perceived_prob, load_hgf_trajectory_column,
+)
 from compute import (
     compute_psth, compute_aligned_raster, compute_acg,
     perceived_probability, trial_firing_rates, binned_stats,
@@ -151,8 +154,102 @@ def draw_acg(ax, sess, train, label, lag_ms=200, bin_ms=1):
     ax.tick_params(labelsize=6)
 
 
-def draw_fr_vs_p(ax, sess, train, label, window="trial", history=10, n_bins=8):
-    """Firing rate vs perceived P(reward) for one neuron (gamble trials only)."""
+def _trial_conditions(sess) -> np.ndarray:
+    """Per-trial outcome-condition key array (object; None where no condition)."""
+    cond = np.full(len(sess.trials), None, dtype=object)
+    for key, mask in sess.condition_masks().items():
+        cond[mask] = key
+    return cond
+
+
+def _draw_fr_vs_regressor(ax, x, y, label, xlabel, *, xlim=(0.0, 1.0),
+                          n_bins=8, conditions=None):
+    """Scatter firing rate (y) vs a per-trial regressor (x). The single home for
+    the FR-vs-* plot body, shared by all three draws below.
+
+    `x`/`y` are full-length per-trial arrays (NaN where undefined); only finite
+    pairs are used. `xlim` sets both the bin range and the axis limits.
+
+    conditions is None  -> one pooled distribution: blue scatter, navy binned
+                           mean ± SEM, and a single global linear fit.
+    conditions is given -> per-trial CONDITIONS-key array: colour each point by
+                           outcome and fit one regression line per condition.
+    """
+    ok = np.isfinite(x) & np.isfinite(y)
+    lo, hi = xlim
+
+    if conditions is None:
+        if ok.sum() >= 4:
+            xv, yv = x[ok], y[ok]
+            ax.scatter(xv, yv, s=9, alpha=0.25, color="steelblue",
+                       linewidths=0, rasterized=True, zorder=2)
+            cx, mn, se = binned_stats(xv, yv, n_bins, lo, hi)
+            if cx.size > 0:
+                ax.errorbar(cx, mn, yerr=se, fmt="o-", color="navy", markersize=4,
+                            linewidth=1.4, capsize=3, label="Bin mean ± SEM", zorder=5)
+            slope, intercept, r_val, p_val, _ = stats.linregress(xv, yv)
+            xline  = np.array([lo, hi])
+            p_str  = f"{p_val:.3f}" if p_val >= 0.001 else "<0.001"
+            ax.plot(xline, intercept + slope * xline, color="firebrick",
+                    linewidth=1.2, linestyle="--", zorder=4,
+                    label=f"r = {r_val:.2f},  p = {p_str}")
+            ax.legend(fontsize=5.5, loc="upper right", framealpha=0.8)
+        else:
+            ax.text(0.5, 0.5, "insufficient data", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=7, color="gray")
+    else:
+        labeled = False
+        for key, cfg in CONDITIONS.items():
+            m = ok & (conditions == key)
+            if not m.any():
+                continue
+            n_pts  = int(m.sum())
+            xv, yv = x[m], y[m]
+            ax.scatter(xv, yv, s=9, alpha=0.3, color=cfg["color"],
+                       linewidths=0, rasterized=True, zorder=2,
+                       label=None if n_pts >= 4 else f"{cfg['label']} (n={n_pts})")
+            if n_pts >= 4:
+                slope, intercept, r_val, p_val, _ = stats.linregress(xv, yv)
+                xline = np.array([xv.min(), xv.max()])   # span this condition's own data, no extrapolation
+                p_str = f"{p_val:.3f}" if p_val >= 0.001 else "<0.001"
+                ax.plot(xline, intercept + slope * xline, color=cfg["color"],
+                        linewidth=1.6, zorder=4,
+                        label=f"{cfg['label']} (n={n_pts}): r={r_val:.2f}, p={p_str}")
+            labeled = True
+        if labeled:
+            ax.legend(fontsize=5.0, loc="best", framealpha=0.85)
+        elif not ok.any():
+            ax.text(0.5, 0.5, "insufficient data", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=7, color="gray")
+
+    if lo < 0 < hi:
+        ax.axvline(0, color="gray", linewidth=0.8, linestyle=":", zorder=1)
+    pad = 0.03 * (hi - lo)
+    ax.set_xlim(lo - pad, hi + pad)
+    ax.set_xlabel(xlabel, fontsize=7)
+    ax.set_ylabel("Firing rate (Hz)", fontsize=7)
+    ax.set_title(label, fontsize=6.5)
+    ax.tick_params(labelsize=6)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def _hgf_missing(ax, label, xlabel):
+    """Placeholder when a session has no HGF trajectory CSV yet."""
+    ax.text(0.5, 0.5, "no HGF trajectory\n(run analysis.hgf.run)",
+            transform=ax.transAxes, ha="center", va="center",
+            fontsize=7, color="gray")
+    ax.set_title(label, fontsize=6.5)
+    ax.set_xlabel(xlabel, fontsize=7)
+    ax.tick_params(labelsize=6)
+
+
+def draw_fr_vs_p(ax, sess, train, label, window="trial", history=10, n_bins=8,
+                 by_condition=False):
+    """Firing rate vs behavioural perceived P(reward) for one neuron (gamble trials only).
+
+    x = rolling fraction of rewards over the last `history` gamble trials.
+    `by_condition=True` colours points by outcome and fits one line per condition.
+    """
     if window not in WINDOWS:
         raise ValueError(f"window must be one of {WINDOWS}")
 
@@ -160,64 +257,97 @@ def draw_fr_vs_p(ax, sess, train, label, window="trial", history=10, n_bins=8):
     perc_prob   = perceived_probability(sess.trials, sess.responding_mask, history=history)
     rates       = trial_firing_rates([train], sess.trials, sess.sampling_rate,
                                      window=window, trial_mask=gamble_mask)
+    conds = _trial_conditions(sess) if by_condition else None
+    _draw_fr_vs_regressor(ax, perc_prob, rates[:, 0], label, "Perceived P(reward)",
+                          xlim=(0.0, 1.0), n_bins=n_bins, conditions=conds)
 
-    x  = perc_prob
-    y  = rates[:, 0]
-    ok = np.isfinite(x) & np.isfinite(y)
 
-    if ok.sum() >= 4:
-        xv, yv = x[ok], y[ok]
-        ax.scatter(xv, yv, s=9, alpha=0.25, color="steelblue",
-                   linewidths=0, rasterized=True, zorder=2)
-        cx, mn, se = binned_stats(xv, yv, n_bins)
-        if cx.size > 0:
-            ax.errorbar(cx, mn, yerr=se, fmt="o-", color="navy", markersize=4,
-                        linewidth=1.4, capsize=3, label="Bin mean ± SEM", zorder=5)
-        slope, intercept, r_val, p_val, _ = stats.linregress(xv, yv)
-        x_line = np.array([0.0, 1.0])
-        p_str  = f"{p_val:.3f}" if p_val >= 0.001 else "<0.001"
-        ax.plot(x_line, intercept + slope * x_line, color="firebrick",
-                linewidth=1.2, linestyle="--", zorder=4,
-                label=f"r = {r_val:.2f},  p = {p_str}")
-        ax.legend(fontsize=5.5, loc="upper right", framealpha=0.8)
-    else:
-        ax.text(0.5, 0.5, "insufficient data", transform=ax.transAxes,
-                ha="center", va="center", fontsize=7, color="gray")
+def draw_fr_vs_hgf_p(ax, sess, train, label, window="trial", n_bins=8,
+                     by_condition=False):
+    """Firing rate vs the HGF's perceived gamble-reward probability for one neuron.
 
-    ax.set_xlim(-0.03, 1.03)
-    ax.set_xlabel("Perceived P(reward)", fontsize=7)
-    ax.set_ylabel("Firing rate (Hz)",    fontsize=7)
-    ax.set_title(label, fontsize=6.5)
-    ax.tick_params(labelsize=6)
-    ax.spines[["top", "right"]].set_visible(False)
+    x = the fitted HGF latent p̂ (model belief that the gamble pays the big
+    reward), read from results/hgf/trajectory_<session>.csv. The belief is defined
+    on *every* responding trial, so all responding trials are used.
+    `by_condition=True` colours points by outcome and fits one line per condition.
+    """
+    if window not in WINDOWS:
+        raise ValueError(f"window must be one of {WINDOWS}")
+
+    perc_prob = load_hgf_perceived_prob(sess.id, len(sess.trials))
+    if perc_prob is None:
+        _hgf_missing(ax, label, "HGF perceived P(reward)")
+        return
+
+    rates = trial_firing_rates([train], sess.trials, sess.sampling_rate,
+                               window=window, trial_mask=sess.responding_mask)
+    conds = _trial_conditions(sess) if by_condition else None
+    _draw_fr_vs_regressor(ax, perc_prob, rates[:, 0], label, "HGF perceived P(reward)",
+                          xlim=(0.0, 1.0), n_bins=n_bins, conditions=conds)
+
+
+def draw_fr_vs_delta1(ax, sess, train, label, window="trial", n_bins=8,
+                      by_condition=True):
+    """Firing rate vs the HGF level-1 prediction error δ₁ = outcome − p̂ (gamble trials).
+
+    δ₁ is a genuine reward prediction error only when a gamble outcome is
+    observed, so safe trials — where δ₁ collapses to −p̂ — are excluded. By
+    default (`by_condition=True`) points are coloured by outcome (G+R = positive
+    PE, G+N = negative PE) with a regression line per condition; set
+    `by_condition=False` for a single pooled fit instead.
+    """
+    if window not in WINDOWS:
+        raise ValueError(f"window must be one of {WINDOWS}")
+
+    delta1 = load_hgf_trajectory_column(sess.id, len(sess.trials), "delta1")
+    if delta1 is None:
+        _hgf_missing(ax, label, "Prediction error δ₁")
+        return
+
+    gamble_mask = sess.responding_mask & (sess.trials["ChosenArm_G1S0"].to_numpy() == 1)
+    delta1 = np.where(gamble_mask, delta1, np.nan)   # PE defined only on observed (gamble) trials
+    rates  = trial_firing_rates([train], sess.trials, sess.sampling_rate,
+                                window=window, trial_mask=gamble_mask)
+    conds = _trial_conditions(sess) if by_condition else None
+    _draw_fr_vs_regressor(ax, delta1, rates[:, 0], label,
+                          "Prediction error  δ₁ = outcome − p̂",
+                          xlim=(-1.0, 1.0), n_bins=n_bins, conditions=conds)
 
 
 # Dispatch tables — the single source of truth for "what kinds exist".
 _DRAW = {
-    "psth":    draw_psth,
-    "raster":  draw_raster,
-    "acg":     draw_acg,
-    "fr_vs_p": draw_fr_vs_p,
+    "psth":        draw_psth,
+    "raster":      draw_raster,
+    "acg":         draw_acg,
+    "fr_vs_p":     draw_fr_vs_p,
+    "fr_vs_hgf_p": draw_fr_vs_hgf_p,
+    "fr_vs_delta1": draw_fr_vs_delta1,
 }
 _GRID_FIGSIZE = {
-    "psth":    (4.0, 3.0),
-    "raster":  (5.0, 2.0),
-    "acg":     (4.0, 3.0),
-    "fr_vs_p": (4.5, 3.5),
+    "psth":        (4.0, 3.0),
+    "raster":      (5.0, 2.0),
+    "acg":         (4.0, 3.0),
+    "fr_vs_p":     (4.5, 3.5),
+    "fr_vs_hgf_p": (4.5, 3.5),
+    "fr_vs_delta1": (4.5, 3.5),
 }
 _PANEL_FIGSIZE = {
-    "psth":    (7.0, 3.0),
-    "raster":  (7.0, 3.0),
-    "acg":     (7.0, 3.0),
-    "fr_vs_p": (6.5, 4.0),
+    "psth":        (7.0, 3.0),
+    "raster":      (7.0, 3.0),
+    "acg":         (7.0, 3.0),
+    "fr_vs_p":     (6.5, 4.0),
+    "fr_vs_hgf_p": (6.5, 4.0),
+    "fr_vs_delta1": (6.5, 4.0),
 }
 # Plots whose legend is identical on every axis -> draw it once in a grid.
 _LEGEND_SHARED = {"psth", "raster"}
 _KIND_TITLE = {
-    "psth":    "PSTH",
-    "raster":  "Aligned raster",
-    "acg":     "Autocorrelograms",
-    "fr_vs_p": "FR vs perceived P(reward)",
+    "psth":        "PSTH",
+    "raster":      "Aligned raster",
+    "acg":         "Autocorrelograms",
+    "fr_vs_p":     "FR vs perceived P(reward)",
+    "fr_vs_hgf_p": "FR vs HGF perceived P(reward)",
+    "fr_vs_delta1": "FR vs prediction error (δ₁)",
 }
 
 
@@ -316,11 +446,25 @@ class NeuronView:
             ["acg", f"n{self.idx}"],
         )
 
-    def fr_vs_p(self, window="trial", history=10, n_bins=8) -> Panel:
+    def fr_vs_p(self, window="trial", history=10, n_bins=8, by_condition=False) -> Panel:
         return self._panel(
             "fr_vs_p",
-            dict(window=window, history=history, n_bins=n_bins),
+            dict(window=window, history=history, n_bins=n_bins, by_condition=by_condition),
             ["fr_vs_p", f"n{self.idx}", window],
+        )
+
+    def fr_vs_hgf_p(self, window="trial", n_bins=8, by_condition=False) -> Panel:
+        return self._panel(
+            "fr_vs_hgf_p",
+            dict(window=window, n_bins=n_bins, by_condition=by_condition),
+            ["fr_vs_hgf_p", f"n{self.idx}", window],
+        )
+
+    def fr_vs_delta1(self, window="trial", n_bins=8, by_condition=True) -> Panel:
+        return self._panel(
+            "fr_vs_delta1",
+            dict(window=window, n_bins=n_bins, by_condition=by_condition),
+            ["fr_vs_delta1", f"n{self.idx}", window],
         )
 
     def __repr__(self) -> str:

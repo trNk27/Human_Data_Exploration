@@ -25,7 +25,9 @@ from utils import EVENTS, CONDITIONS
 
 DATA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PLOT_TYPES = ["PSTH", "Raster", "Aligned Raster", "ACG", "FR vs Perceived P"]
+PLOT_TYPES = ["PSTH", "Raster", "Aligned Raster", "ACG",
+              "FR vs Perceived P", "FR vs HGF Perceived P",
+              "FR vs Prediction Error"]
 
 # Condition filter shared by PSTH / Aligned Raster (maps to grid's `condition`).
 COND_CHOICES = [None, "G+R", "G+N", "S+R", "all"]
@@ -171,6 +173,47 @@ with st.sidebar:
             help="Number of past responding trials used to estimate P(reward)",
         )
         fr_bins    = st.slider("Probability bins", 4, 15, 8)
+        fr_by_cond = st.checkbox(
+            "Colour by outcome (per-condition fit)", value=False, key="fr_by_cond",
+            help="Colour points by outcome (G+R / G+N) and fit one regression each",
+        )
+
+    elif plot_type == "FR vs HGF Perceived P":
+        hgf_window = st.selectbox(
+            "Firing-rate window",
+            options=list(WINDOWS),
+            format_func=lambda k: WINDOW_LABELS[k],
+            key="hgf_window",
+        )
+        hgf_bins   = st.slider("Probability bins", 4, 15, 8, key="hgf_bins")
+        hgf_by_cond = st.checkbox(
+            "Colour by outcome (per-condition fit)", value=False, key="hgf_by_cond",
+            help="Colour points by outcome (G+R / G+N / S+R) and fit one regression each",
+        )
+        st.caption(
+            "x-axis is the fitted HGF latent belief P(gamble reward). "
+            "Requires results/hgf/trajectory_<session>.csv "
+            "(run `python -m analysis.hgf.run`)."
+        )
+
+    elif plot_type == "FR vs Prediction Error":
+        pe_window = st.selectbox(
+            "Firing-rate window",
+            options=list(WINDOWS),
+            format_func=lambda k: WINDOW_LABELS[k],
+            key="pe_window",
+        )
+        pe_bins   = st.slider("Bins (pooled overlay)", 4, 15, 8, key="pe_bins")
+        pe_by_cond = st.checkbox(
+            "Colour by outcome (per-condition fit)", value=True, key="pe_by_cond",
+            help="G+R = positive PE, G+N = negative PE; one regression each",
+        )
+        st.caption(
+            "x-axis is the HGF level-1 prediction error δ₁ = outcome − p̂. "
+            "Gamble trials only (δ₁ is undefined on safe trials). "
+            "Requires results/hgf/trajectory_<session>.csv "
+            "(run `python -m analysis.hgf.run`)."
+        )
 
     st.divider()
     run = st.button("Plot", type="primary", use_container_width=True)
@@ -220,6 +263,21 @@ if run:
                     sess, "fr_vs_p",
                     neurons=neuron_indices, area=area_filter,
                     window=fr_window, history=fr_history, n_bins=fr_bins,
+                    by_condition=fr_by_cond,
+                ).fig
+            elif plot_type == "FR vs HGF Perceived P":
+                fig = grid(
+                    sess, "fr_vs_hgf_p",
+                    neurons=neuron_indices, area=area_filter,
+                    window=hgf_window, n_bins=hgf_bins,
+                    by_condition=hgf_by_cond,
+                ).fig
+            elif plot_type == "FR vs Prediction Error":
+                fig = grid(
+                    sess, "fr_vs_delta1",
+                    neurons=neuron_indices, area=area_filter,
+                    window=pe_window, n_bins=pe_bins,
+                    by_condition=pe_by_cond,
                 ).fig
 
         st.session_state.fig_bytes = fig_to_png(fig)
