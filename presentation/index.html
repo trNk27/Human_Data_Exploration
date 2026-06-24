@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Reward Encoding in the Human Brain — Preliminary Findings</title>
+
+  <!-- reveal.js core + theme (CDN, same approach as the ZETA visualizer) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css" id="theme">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+  <style>
+    :root {
+      --accent: #4f46e5;       /* indigo, matches zeta_mathematical_visualizer.html */
+      --accent-2: #0d9488;     /* teal */
+      --reward: #e11d48;       /* rose  */
+      --choice: #2563eb;       /* blue  */
+      --ink: #1e293b;
+      --muted: #64748b;
+    }
+    .reveal { font-family: 'Inter', sans-serif; color: var(--ink); }
+    .reveal h1, .reveal h2, .reveal h3, .reveal h4 { font-family: 'Inter', sans-serif; font-weight: 700; color: #0f172a; text-transform: none; letter-spacing: -0.01em; }
+    .reveal h1 { font-size: 1.9em; line-height: 1.1; }
+    .reveal h2 { font-size: 1.35em; color: var(--accent); margin-bottom: 0.35em; }
+    .reveal h3 { font-size: 1.0em; }
+    .reveal p, .reveal li { font-size: 0.78em; line-height: 1.4; }
+    .reveal section { text-align: left; }
+    .reveal .center { text-align: center; }
+    .reveal strong { color: #0f172a; }
+    .reveal em.term { color: var(--accent); font-style: normal; font-weight: 600; }
+
+    /* slide chrome */
+    .kicker { display:inline-block; font-size:0.5em; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:var(--accent); border:1px solid var(--accent); border-radius:999px; padding:3px 12px; margin-bottom:0.5em; }
+    .reveal .footnote { font-size: 0.5em; color: var(--muted); margin-top: 0.6em; }
+
+    /* two-column layout */
+    .cols { display:flex; gap:1.4em; align-items:flex-start; }
+    .cols > div { flex:1; }
+    .col-narrow { flex:0.8 !important; }
+
+    /* tables */
+    .reveal table { font-size: 0.5em; margin: 0; }
+    .reveal table th { background:#eef2ff; color:#312e81; }
+    .reveal table td, .reveal table th { padding: 4px 8px; }
+
+    /* key-number callouts */
+    .stat-row { display:flex; gap:1em; justify-content:center; margin:0.6em 0; }
+    .stat { text-align:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px 18px; min-width:130px; }
+    .stat .num { font-size:1.6em; font-weight:700; color:var(--accent); line-height:1; }
+    .stat .lbl { font-size:0.5em; color:var(--muted); margin-top:6px; }
+
+    /* equation cards */
+    .eqcard { background:#f8fafc; border:1px solid #e2e8f0; border-left:4px solid var(--accent); border-radius:10px; padding:8px 16px; margin:0.4em 0; }
+    .eqnote { font-size:0.62em; color:var(--muted); }
+
+    /* FIGURE PLACEHOLDERS — these tell you (and me) exactly what to plot */
+    .placeholder {
+      border:2px dashed var(--accent);
+      background: repeating-linear-gradient(45deg,#eef2ff,#eef2ff 14px,#e0e7ff 14px,#e0e7ff 28px);
+      border-radius:14px; padding:14px 18px; color:#312e81; text-align:left;
+      margin:0.4em 0;
+    }
+    .placeholder .ph-tag { display:inline-block; font-size:0.5em; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:var(--accent); color:#fff; border-radius:6px; padding:2px 8px; margin-bottom:6px; }
+    .placeholder .ph-title { font-weight:700; font-size:0.72em; margin-bottom:4px; }
+    .placeholder .ph-show { font-size:0.62em; line-height:1.35; }
+    .placeholder .ph-cand { font-size:0.55em; color:#4338ca; margin-top:6px; font-family:'JetBrains Mono',monospace; }
+    .placeholder .ph-cand b { color:#312e81; }
+
+    .reveal pre { width:100%; box-shadow:none; font-size:0.5em; }
+    .reveal pre code { border-radius:8px; padding:12px 14px; }
+
+    .reveal .slide-number { font-size:0.5em; color:var(--muted); }
+    .reveal .progress { color: var(--accent); height:4px; }
+
+    .title-meta { color:var(--muted); font-size:0.7em; margin-top:1.2em; }
+    .pill { background:var(--accent); color:#fff; padding:2px 10px; border-radius:999px; font-size:0.8em; }
+    .legend-r { color:var(--reward); font-weight:700; }
+    .legend-c { color:var(--choice); font-weight:700; }
+  </style>
+</head>
+
+<body>
+<div class="reveal">
+<div class="slides">
+
+  <!-- 1. TITLE -->
+  <section data-auto-animate>
+    <div class="center">
+      <span class="kicker">Preliminary findings</span>
+      <h1>Reward Encoding in the Human Brain<br>during Risky Choice</h1>
+      <p style="font-size:0.95em; color:var(--muted); margin-top:0.6em;">
+        Single-neuron recordings during a two-armed gamble task
+      </p>
+      <p class="title-meta"> Manuel Stammler &nbsp;·&nbsp; 29.06.2026 </p>
+    </div>
+    <aside class="notes">
+      One-line framing: we recorded individual neurons from a human patient while they made risky
+      choices, and we ask whether single neurons encode the choice and the reward — and whether
+      their firing tracks the latent variables of a learning model.
+    </aside>
+  </section>
+
+  <!-- 2. AGENDA -->
+  <section>
+    <h2>Today</h2>
+    <ol>
+      <li>The patient, the task, and the data</li>
+      <li><strong>Aim</strong> — choice &amp; reward coding; perceived probability &amp; prediction error</li>
+      <li><strong>ZETA</strong> — a parameter-free test for time-locked spiking </li>
+      <li><strong>Behavioural modelling</strong> — Rescorla–Wagner + stickiness, and Hierarchical Gaussian Filter</li>
+      <li>First results &amp; next steps</li>
+    </ol>
+    <p class="footnote">Some methods (ZETA, the HGF) are explained from scratch — interrupt with questions.</p>
+  </section>
+
+  <!-- 3. PROJECT SUMMARY: patient & recording -->
+  <section>
+    <span class="kicker">Project summary</span>
+    <h2>One patient, many neurons</h2>
+    <div class="cols">
+      <div>
+        <ul>
+          <li><em class="term">Stroke patient</em> with chronically implanted <em class="term">intracranial microelectrode arrays</em>.</li>
+          <li>Spikes are already sorted into <strong>units</strong> (single- &amp; multi-unit); sampling at <strong>30&nbsp;kHz</strong>.</li>
+          <li>Four cortical regions recorded:
+            <ul>
+              <li><strong>Frontal:</strong> middle frontal gyrus (MFG), inferior frontal gyrus (IFG)</li>
+              <li><strong>Parietal:</strong> supramarginal gyrus (SMG), angular gyrus (AG)</li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+      <div class="col-narrow">
+        <div class="stat-row" style="flex-wrap:wrap;">
+          <div class="stat"><div class="num">1,845</div><div class="lbl">sorted units<br>(1,386 single / 459 multi)</div></div>
+        </div>
+        <table>
+          <tr><th>Region</th><th>Units (pooled)</th></tr>
+          <tr><td>MFG (frontal)</td><td>702</td></tr>
+          <tr><td>SMG (parietal)</td><td>561</td></tr>
+          <tr><td>IFG (frontal)</td><td>469</td></tr>
+          <tr><td>AG (parietal)</td><td>113</td></tr>
+        </table>
+      </div>
+    </div>
+    <aside class="notes">N = 1 patient. Every inference is within-subject, across sessions — never a population claim.</aside>
+  </section>
+
+  <!-- 4. PROJECT SUMMARY: the task -->
+  <section>
+    <span class="kicker">Project summary</span>
+    <h2>The two-armed risky-choice task</h2>
+    <div class="cols">
+      <div>
+        <p>Each trial the patient chooses one of two arms:</p>
+        <ul>
+          <li><span class="pill" style="background:var(--reward)">Gamble</span> &nbsp;big reward with probability <strong>P</strong>, otherwise nothing.
+            <br><span style="font-size:0.85em;color:var(--muted)">P steps in blocks of ~25 trials across <strong>{0.1, 0.2, 0.4, 0.8}</strong>.</span></li>
+          <li><span class="pill" style="background:var(--accent-2)">Safe</span> &nbsp;a small <strong>certain</strong> reward.</li>
+        </ul>
+        <p>Reward <em>magnitudes</em> are not stored in the exports, so modelling assumes the canonical task ratio <strong>4 : 1</strong> (gamble : safe). Choice is read from the reliable <code>ChosenArm</code> column; non-responding trials are excluded.</p>
+      </div>
+      <div>
+        <div class="placeholder">
+          <span class="ph-tag">▣ Figure needed — your spec</span>
+          <div class="ph-title">Task schematic</div>
+          <div class="ph-show">A clean diagram of one trial: fixation → cue (two arms) → choice → outcome,
+            with the block-wise probability schedule (0.1→0.2→0.4→0.8) shown as a step function underneath.</div>
+          <div class="ph-cand">Candidate: <b>none yet</b> — likely a hand-drawn/Illustrator schematic, or I can render one in matplotlib.</div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes">Key point: the gamble's win-probability drifts in blocks; the patient must track it. The safe arm is the boring baseline.</aside>
+  </section>
+
+  <!-- 5. PROJECT SUMMARY: the numbers -->
+  <section>
+    <span class="kicker">Project summary</span>
+    <h2>Eight sessions, weeks apart</h2>
+    <div class="stat-row">
+      <div class="stat"><div class="num">8</div><div class="lbl">sessions</div></div>
+      <div class="stat"><div class="num">70–143</div><div class="lbl">minutes / session</div></div>
+      <div class="stat"><div class="num">6,627</div><div class="lbl">responding trials</div></div>
+      <div class="stat"><div class="num">0.37</div><div class="lbl">gamble rate</div></div>
+    </div>
+    <table style="margin:0 auto;">
+      <tr><th>Session</th><th>Trials (resp.)</th><th>Units (su/mu)</th><th>Rec. (min)</th><th>Gamble</th><th>Reward</th></tr>
+      <tr><td>20250521</td><td>1009 (939)</td><td>252 (180/72)</td><td>116</td><td>0.42</td><td>0.77</td></tr>
+      <tr><td>20250602</td><td>1018 (947)</td><td>214 (152/62)</td><td>118</td><td>0.36</td><td>0.81</td></tr>
+      <tr><td>20250605</td><td>1037 (962)</td><td>241 (167/74)</td><td>143</td><td>0.35</td><td>0.82</td></tr>
+      <tr><td>20250703</td><td>635 (507)</td><td>215 (165/50)</td><td>70</td><td>0.33</td><td>0.81</td></tr>
+      <tr><td>20250707</td><td>911 (772)</td><td>220 (167/53)</td><td>129</td><td>0.38</td><td>0.81</td></tr>
+      <tr><td>20250709</td><td>694 (639)</td><td>225 (184/41)</td><td>105</td><td>0.37</td><td>0.81</td></tr>
+      <tr><td>20250710</td><td>984 (902)</td><td>249 (191/58)</td><td>135</td><td>0.36</td><td>0.81</td></tr>
+      <tr><td>20250714</td><td>1006 (959)</td><td>229 (180/49)</td><td>116</td><td>0.40</td><td>0.80</td></tr>
+      <tr style="font-weight:700;"><td>Total</td><td>7294 (6627)</td><td>1845 (1386/459)</td><td>—</td><td>0.37</td><td>0.80</td></tr>
+    </table>
+    <p class="footnote">Schedules re-randomised per session, so models reset beliefs at each session boundary. Session 20250703 is short and disengaged (20% misses) — weight with caution.</p>
+  </section>
+
+  <!-- 6. AIM -->
+  <section>
+    <span class="kicker">Aim</span>
+    <h2>Two questions</h2>
+    <div class="cols">
+      <div>
+        <div class="eqcard" style="border-left-color:var(--reward)">
+          <h3 style="color:var(--reward)">1 · Selectivity</h3>
+          <p>Are there neurons that <strong>selectively respond to the choice</strong> (which arm)
+             or <strong>to the reward</strong> (the outcome)?</p>
+        </div>
+      </div>
+      <div>
+        <div class="eqcard" style="border-left-color:var(--choice)">
+          <h3 style="color:var(--choice)">2 · Latent-variable coding</h3>
+          <p>Are firing rates related to the <strong>perceived probability</strong> of reward
+             (the belief <em>before</em> the outcome) or to the <strong>prediction error</strong>
+             (the surprise <em>after</em> the outcome)?</p>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:0.6em;">Question 2 needs latent variables we cannot observe directly — they come from a <em class="term">behavioural model</em>. This is the <strong>model → brain</strong> bridge that motivates the second half of the talk.</p>
+  </section>
+
+  <!-- 7. ZETA concept -->
+  <section>
+    <span class="kicker">Spike-timing analysis</span>
+    <h2>ZETA — testing for time-locked spiking</h2>
+    <div class="cols">
+      <div>
+        <p>The classic PSTH forces an arbitrary choice — the <strong>bin size</strong> — and the answer can change with it.</p>
+        <p><em class="term">ZETA</em> (<strong>Z</strong>enith of <strong>E</strong>vent-based <strong>T</strong>ime-locked <strong>A</strong>nomalies) is <strong>binning-free and parameter-free</strong>:</p>
+        <ol>
+          <li>Pool spike times relative to the event across all trials.</li>
+          <li>Build their <strong>cumulative distribution</strong>.</li>
+          <li>Compare to the flat line expected if spikes were <strong>uniformly</strong> spread (no time-locking).</li>
+          <li>The <strong>largest deviation</strong> from that line is ZETA; its timing is the <strong>zenith</strong>.</li>
+          <li>Significance from <strong>jittered</strong> resampling of event times.</li>
+        </ol>
+      </div>
+      <div>
+        <div class="placeholder">
+          <span class="ph-tag">▣ Figure needed — your spec</span>
+          <div class="ph-title">ZETA intuition cartoon</div>
+          <div class="ph-show">Three small stacked panels: (i) raster around an event, (ii) cumulative spike curve vs. the diagonal "uniform" null, (iii) the deviation trace with the zenith marked. <strong>The next slide is a live version of exactly this.</strong></div>
+          <div class="ph-cand">Candidate: a still frame exported from <b>zeta_mathematical_visualizer.html</b>, or keep this slide text-only and let the live demo carry it.</div>
+        </div>
+      </div>
+    </div>
+    <p class="footnote">Reference: Montijn et al., <em>eLife</em> 2021 — "A parameter-free statistical test for neuronal responsiveness".</p>
+    <aside class="notes">Emphasise the win: no bin size to tune, no smoothing kernel to justify. One number per neuron, with a p-value.</aside>
+  </section>
+
+  <!-- 8. ZETA one vs two sample -->
+  <section>
+    <h2>One-sample vs. two-sample ZETA</h2>
+    <div class="cols">
+      <div class="eqcard">
+        <h3>One-sample → <span style="color:var(--accent)">responsiveness</span></h3>
+        <p>Is the neuron time-locked to an event <strong>at all</strong>?</p>
+        <p class="eqnote">spike timing vs. a uniform null around one event.</p>
+      </div>
+      <div class="eqcard" style="border-left-color:var(--accent-2)">
+        <h3 style="color:var(--accent-2)">Two-sample (ZETA2) → <span>selectivity</span></h3>
+        <p>Does the time-locked response <strong>differ between two trial types</strong>?</p>
+        <p class="eqnote">e.g. <span class="legend-r">rewarded vs. not</span> (outcome) &nbsp;·&nbsp; <span class="legend-c">gamble vs. safe</span> (choice).</p>
+      </div>
+    </div>
+    <p style="margin-top:0.7em;">The two-sample test is the one we trust: it holds timing fixed and <strong>subtracts the shared baseline</strong>, so slow drift and rate differences cancel out. <span style="color:var(--muted)">(Why — see the limitations slide.)</span></p>
+    <p class="center" style="margin-top:0.8em;"><span class="pill">Next: drag the sliders →</span></p>
+  </section>
+
+  <!-- 9. ZETA VISUALIZER (live, embedded) -->
+  <section data-background-iframe="zeta_mathematical_visualizer.html" data-background-interactive>
+    <div style="position:absolute; top:14px; left:14px; background:rgba(255,255,255,0.92); border:1px solid #e2e8f0; border-radius:10px; padding:8px 14px; max-width:340px;">
+      <div class="kicker" style="margin:0;">Interactive demo</div>
+      <p style="font-size:0.5em; margin:6px 0 0; color:var(--ink);">
+        Move a burst of spikes in time and watch the cumulative curve bend away from the
+        uniform null — the <strong>zenith</strong> tracks where the response peaks. Tab 2 shows the
+        <strong>two-sample</strong> contrast between conditions.
+      </p>
+      <p style="font-size:0.45em; margin:6px 0 0; color:var(--muted);">Use ← / → (or <kbd>Esc</kbd> for the overview) to leave this slide.</p>
+    </div>
+    <aside class="notes">Live demo. Drive the single-sample tab first (move burst 1, add burst 2), then switch to the two-sample tab to motivate the selectivity analysis.</aside>
+  </section>
+
+  <!-- 10. ZETA RESULTS -->
+  <section>
+    <span class="kicker">ZETA results</span>
+    <h2>About half the population is selective</h2>
+    <div class="stat-row">
+      <div class="stat" style="border-color:var(--reward)"><div class="num" style="color:var(--reward)">52%</div><div class="lbl">reward-selective<br>(rewarded vs not)</div></div>
+      <div class="stat" style="border-color:var(--choice)"><div class="num" style="color:var(--choice)">46%</div><div class="lbl">choice-selective<br>(gamble vs safe)</div></div>
+    </div>
+    <p class="center" style="font-size:0.7em;color:var(--muted);">two-sample ZETA, reward-aligned, FDR q&nbsp;&lt;&nbsp;0.05</p>
+    <div class="cols">
+      <div class="placeholder">
+        <span class="ph-tag">▣ Figure needed — your spec</span>
+        <div class="ph-title">PSTH — a CHOICE-only selective neuron</div>
+        <div class="ph-show">A unit significant for the <span class="legend-c">gamble-vs-safe</span> contrast but <strong>not</strong> for reward. Overlay G vs S PSTHs (reward-aligned), shaded SEM.</div>
+        <div class="ph-cand">Candidate source: cross-reference <b>results/zeta_outcome/zeta2_choice_*.csv</b> (sig.) against <b>zeta2_reward_*.csv</b> (n.s.); plot with the repo's PSTH viewer.</div>
+      </div>
+      <div class="placeholder">
+        <span class="ph-tag">▣ Figure needed — your spec</span>
+        <div class="ph-title">PSTH — a REWARD-only selective neuron</div>
+        <div class="ph-show">A unit significant for the <span class="legend-r">rewarded-vs-not</span> contrast but <strong>not</strong> for choice. Overlay G+R vs G+N PSTHs, shaded SEM.</div>
+        <div class="ph-cand">Candidate source: <b>zeta2_reward_*.csv</b> (sig.) ∩ <b>zeta2_choice_*.csv</b> (n.s.).</div>
+      </div>
+    </div>
+    <div class="placeholder">
+      <span class="ph-tag">▣ Figure needed — your spec</span>
+      <div class="ph-title">Regional double dissociation (summary bar)</div>
+      <div class="ph-show">Reward coding is <strong>frontal-dominant</strong> (MFG 62%, IFG 60% ≫ SMG 36%, AG 36%); choice coding is <strong>strongest in angular gyrus</strong> (AG 63%). Grouped bars, % selective per region × contrast.</div>
+      <div class="ph-cand">Candidate existing file: <b>results/report/fig_outcome_by_region.png</b> — approve to embed, or respec.</div>
+    </div>
+  </section>
+
+  <!-- 11. ZETA limitations -->
+  <section>
+    <span class="kicker">ZETA results</span>
+    <h2>A limitation to respect</h2>
+    <div class="cols">
+      <div>
+        <p>The <strong>one-sample</strong> test reports ~<strong>90%</strong> of units "responsive" to almost every event:</p>
+        <table>
+          <tr><th>Aligned to</th><th>% responsive (FDR)</th></tr>
+          <tr><td>Trial start</td><td>89.4%</td></tr>
+          <tr><td>Cue</td><td>92.0%</td></tr>
+          <tr><td>Cue → reward</td><td>93.4%</td></tr>
+          <tr><td>Reward onset</td><td>75.7%</td></tr>
+        </table>
+        <p style="margin-top:0.5em;">With ~30k spikes/unit, ZETA flags <strong>any</strong> non-flat firing — slow drift, rhythmicity, motion. The near-identical rates across four <em>different</em> events are the tell-tale sign.</p>
+      </div>
+      <div>
+        <div class="eqcard" style="border-left-color:var(--accent-2)">
+          <h3 style="color:var(--accent-2)">What we do about it</h3>
+          <ul>
+            <li>Treat one-sample responsiveness only as a coarse <strong>"channel is alive"</strong> filter.</li>
+            <li>Put the scientific weight on the <strong>two-sample contrasts</strong> — the shared baseline cancels, so drift can't masquerade as selectivity.</li>
+            <li>The numbers on the previous slide are all two-sample.</li>
+          </ul>
+        </div>
+        <p class="footnote">Independently flagged and confirmed by adversarial re-derivation of every headline number.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. BEHAVIOURAL MODELLING -->
+  <section>
+    <span class="kicker">Behavioural modelling</span>
+    <h2>Why model behaviour at all?</h2>
+    <div class="cols">
+      <div>
+        <p>We can <strong>observe choices</strong>. We <strong>cannot observe</strong> the cognitive variables that drive them — the belief about reward, the value of each arm, the learning rate, the prediction error.</p>
+        <p>A behavioural model is a <strong>generative rule</strong>:</p>
+        <p class="center" style="font-size:0.9em;">outcomes &nbsp;→&nbsp; <em class="term">latent variables</em> &nbsp;→&nbsp; choices</p>
+        <p>fit to the patient's actual choices. Fitting it <strong>infers the latent variables trial-by-trial</strong>.</p>
+      </div>
+      <div>
+        <div class="eqcard">
+          <h3>The point</h3>
+          <p>Extract a per-trial <strong>perceived probability</strong> \( \hat p_t \) and <strong>prediction error</strong> \( \delta_t \), then regress single-neuron firing against them.</p>
+          <p class="eqnote">That is exactly the <strong>model → brain</strong> bridge needed for Aim&nbsp;2.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. RESCORLA-WAGNER / Q-LEARNING -->
+  <section>
+    <span class="kicker">Model 1</span>
+    <h2>Rescorla–Wagner / Q-learning</h2>
+    <div class="cols">
+      <div>
+        <p>Learn the value \(V\) of the gamble by nudging it toward each outcome:</p>
+        <div class="eqcard">
+          $$\delta_t = r_t - V_t \qquad V_{t+1} = V_t + \alpha\,\delta_t$$
+          <p class="eqnote">\(\delta_t\) = <strong>prediction error</strong> (surprise); \(\alpha\) = <strong>fixed learning rate</strong>; updated <strong>after every outcome</strong>.</p>
+        </div>
+        <p>Choices come from a sigmoid on the value difference:</p>
+        <div class="eqcard">
+          $$P(\text{gamble})_t = \sigma\!\big(\beta\,\Delta V_t \;+\; \underbrace{\kappa\,c_{t-1}}_{\text{stickiness}} \;+\; b\big)$$
+          <p class="eqnote">\(c_{t-1}=\pm1\) = previous choice; \(\kappa\) weights <strong>perseveration</strong>; \(b\) = overall bias.</p>
+        </div>
+      </div>
+      <div>
+        <div class="eqcard" style="border-left-color:var(--accent-2)">
+          <h3 style="color:var(--accent-2)">Why it's a good baseline</h3>
+          <p>Simple, few parameters, captures incremental trial-and-error learning.</p>
+        </div>
+        <div class="eqcard" style="border-left-color:var(--reward)">
+          <h3 style="color:var(--reward)">Why the stickiness term</h3>
+          <p>The patient is strongly <strong>perseverative</strong> and asymmetric:</p>
+          <div class="stat-row" style="margin:0.3em 0;">
+            <div class="stat"><div class="num">0.93</div><div class="lbl">win-stay</div></div>
+            <div class="stat"><div class="num">0.58</div><div class="lbl">lose-shift</div></div>
+          </div>
+          <p class="eqnote">Clings to a winning gamble far more than it abandons a losing one — a pure value learner can't capture this.</p>
+        </div>
+      </div>
+    </div>
+    <aside class="notes">Stickiness = choice kernel = a tendency to repeat the last action regardless of value. It's one extra parameter that pays for itself many times over (next slide).</aside>
+  </section>
+
+  <!-- 14. RW results / model comparison -->
+  <section>
+    <span class="kicker">Model 1 — result</span>
+    <h2>Simple RL + stickiness wins</h2>
+    <div class="cols">
+      <div>
+        <table>
+          <tr><th>Model</th><th>k</th><th>BIC</th><th>ΔBIC</th></tr>
+          <tr style="font-weight:700;background:#ecfdf5;"><td>RW + stickiness</td><td>4</td><td>6095.8</td><td>0</td></tr>
+          <tr><td>Rescorla–Wagner</td><td>3</td><td>6256.1</td><td>+160</td></tr>
+          <tr><td>HGF (3-level)</td><td>3</td><td>6697.2</td><td>+601</td></tr>
+        </table>
+        <p class="footnote">Lower BIC = better. Identical trials &amp; identical response model across all three — only the belief-update rule differs.</p>
+        <p style="margin-top:0.5em;">The stickiness term beats both plain RW (ΔBIC&nbsp;160) and the HGF (ΔBIC&nbsp;601). For <em>this</em> task — piecewise-constant blocks — there is little genuine volatility to track, so a habit term suffices.</p>
+      </div>
+      <div>
+        <div class="placeholder">
+          <span class="ph-tag">▣ Figure needed — your spec</span>
+          <div class="ph-title">Model comparison (ΔBIC bars)</div>
+          <div class="ph-show">Bar chart of ΔBIC relative to the best model, three bars, RW+stickiness at zero.</div>
+          <div class="ph-cand">Candidate existing file: <b>results/hgf/figures/model_comparison.png</b> — approve to embed, or respec.</div>
+        </div>
+        <div class="placeholder">
+          <span class="ph-tag">▣ Figure needed — your spec</span>
+          <div class="ph-title">Behaviour overview (optional)</div>
+          <div class="ph-show">Choice tracking the scheduled value, and/or the per-session choice raster with the block schedule overlaid.</div>
+          <div class="ph-cand">Candidates: <b>results/report/fig_choice_vs_value.png</b>, <b>results/figures/behaviour_overview_all.png</b>.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. HGF what / why -->
+  <section>
+    <span class="kicker">Model 2</span>
+    <h2>The Hierarchical Gaussian Filter</h2>
+    <div class="cols">
+      <div>
+        <p>A <strong>Bayesian observer</strong> that infers not just a hidden, drifting reward probability, but also <strong>how fast it is drifting</strong> — its <em class="term">volatility</em> — across stacked levels.</p>
+        <p>3-level binary HGF:</p>
+        <ul>
+          <li>\(x_1\) — the binary <strong>outcome</strong> (reward / no reward)</li>
+          <li>\(x_2\) — the <strong>tendency</strong> toward reward (probability, in logit space)</li>
+          <li>\(x_3\) — the <strong>log-volatility</strong> of \(x_2\)</li>
+        </ul>
+      </div>
+      <div>
+        <div class="eqcard" style="border-left-color:var(--accent-2)">
+          <h3 style="color:var(--accent-2)">Why use it instead of RW?</h3>
+          <p>RW's learning rate \(\alpha\) is <strong>fixed</strong>. The HGF's learning rate is <strong>dynamic</strong> — it is <strong>precision-weighted</strong> and rises when the environment seems uncertain or volatile.</p>
+          <p class="eqnote">A principled, normative account of <strong>adaptive</strong> learning: learn fast when the world is changing, slow when it's stable.</p>
+        </div>
+      </div>
+    </div>
+    <aside class="notes">Pitch the HGF as "RW with a learning rate that knows when to speed up". It's elegant — but for this blocky task it loses to RW+stickiness, which is itself an interesting result.</aside>
+  </section>
+
+  <!-- 16. HGF equations -->
+  <section>
+    <span class="kicker">Model 2 — under the hood</span>
+    <h2>HGF — the key equations</h2>
+    <div class="cols">
+      <div>
+        <div class="eqcard">
+          <p class="eqnote">Belief about reward before the outcome:</p>
+          $$\hat p_t = \sigma\!\big(\mu_2^{(t-1)}\big)$$
+        </div>
+        <div class="eqcard">
+          <p class="eqnote">Prediction error at the outcome \(u_t\in\{0,1\}\):</p>
+          $$\delta_1^{(t)} = u_t - \hat p_t$$
+        </div>
+        <div class="eqcard" style="border-left-color:var(--reward)">
+          <p class="eqnote">Belief update with a <strong>dynamic</strong> learning rate:</p>
+          $$\mu_2^{(t)} = \mu_2^{(t-1)} + \underbrace{\tfrac{1}{\pi_2^{(t)}}}_{\text{learning rate}}\,\delta_1^{(t)}$$
+        </div>
+      </div>
+      <div>
+        <div class="eqcard">
+          <p class="eqnote">Precision (inverse variance) couples to volatility \(x_3\) via \(\kappa,\omega_2\):</p>
+          $$\hat\pi_2^{(t)} = \frac{1}{\sigma_2^{(t-1)} + \exp\!\big(\kappa\,\mu_3^{(t-1)} + \omega_2\big)}$$
+          <p class="eqnote">Higher believed volatility → lower precision → <strong>larger learning rate</strong>.</p>
+        </div>
+        <div class="eqcard" style="border-left-color:var(--accent-2)">
+          <p class="eqnote">Shared response model (same for RW &amp; HGF — fair comparison):</p>
+          $$P(\text{gamble}) = \sigma\!\big(\beta\,(\hat p\cdot 4 - 1) + b\big)$$
+        </div>
+        <p class="footnote">Free parameters: \(\omega_2\) (tonic volatility), \(\beta\) (inverse temperature), \(b\) (bias). Recovery is excellent (r ≈ 0.92–0.97); but \(\omega_2\) drift is <strong>underpowered</strong> with 8 sessions.</p>
+      </div>
+    </div>
+    <p class="footnote">Reference: Mathys et al., <em>Front. Hum. Neurosci.</em> 2011 &amp; 2014. \( \sigma \) = logistic sigmoid.</p>
+  </section>
+
+  <!-- 17. HGF visualizer (live, embedded) -->
+  <section data-background-iframe="hgf_mathematical_visualizer.html" data-background-interactive>
+    <div style="position:absolute; top:14px; left:14px; background:rgba(255,255,255,0.92); border:1px solid #e2e8f0; border-radius:10px; padding:8px 14px; max-width:360px;">
+      <div class="kicker" style="margin:0;">Interactive demo</div>
+      <p style="font-size:0.5em; margin:6px 0 0; color:var(--ink);">
+        Drag \( \omega_2 \) and watch the belief \( \hat p_t \) chase the switching reward world, the
+        <strong>prediction error</strong> \( \delta_1 \) that drives each update, and the
+        <strong>adaptive learning rate</strong>. Tab 2 contrasts a fast vs. a slow learner on the same
+        outcomes. <span style="color:var(--muted)">Leave with the arrow keys (it captures the mouse).</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- 18. HGF results -->
+  <section>
+    <span class="kicker">Model 2 — results</span>
+    <h2>Do firing rates track the model?</h2>
+    <p>The model gives every trial a perceived probability \( \hat p \) and a prediction error \( \delta_1 \). We regress single-neuron firing against them.</p>
+    <div class="cols">
+      <div class="placeholder">
+        <span class="ph-tag">▣ Figure needed — your spec</span>
+        <div class="ph-title">Prediction error vs. firing rate — <em>after</em> reward</div>
+        <div class="ph-show">Per-neuron scatter + fit of reward-window firing rate against \( \delta_1 = u-\hat p \) (gamble trials). Highlight neurons whose firing <strong>most strongly tracks PE</strong>. Hypothesis: PE coding is frontal-dominant (MFG/IFG).</div>
+        <div class="ph-cand">Machinery exists: <b>viewers/firing_rate_vs_delta1.py</b> &nbsp;·&nbsp; reads <b>results/hgf/trajectory_*.csv</b>.</div>
+      </div>
+      <div class="placeholder">
+        <span class="ph-tag">▣ Figure needed — your spec</span>
+        <div class="ph-title">Perceived probability vs. firing rate — <em>before</em> reward</div>
+        <div class="ph-show">Per-neuron scatter + fit of pre-outcome firing rate against the belief \( \hat p \). Highlight neurons whose firing <strong>most strongly tracks subjective value</strong>.</div>
+        <div class="ph-cand">Machinery exists: <b>viewers/firing_rate_vs_hgf_p.py</b> &nbsp;·&nbsp; reads <b>results/hgf/trajectory_*.csv</b>.</div>
+      </div>
+    </div>
+    <p class="footnote">"Find neurons with high p" → please define: top correlation |r|, or smallest p-value, or a specific session/region to feature. I'll generate from your spec.</p>
+  </section>
+
+  <!-- 19. Summary -->
+  <section>
+    <h2>Where we are</h2>
+    <div class="cols">
+      <div>
+        <ul>
+          <li><strong>Behaviour:</strong> a risk-averse value tracker with a strong habit.</li>
+          <li><strong>Model:</strong> RW + stickiness beats the HGF here — hierarchical volatility isn't needed for blocky contingencies.</li>
+          <li><strong>Neural:</strong> ~half of units carry choice / outcome information; a <span class="legend-r">frontal = reward</span> vs <span class="legend-c">AG = choice</span> double dissociation.</li>
+        </ul>
+      </div>
+      <div>
+        <div class="eqcard" style="border-left-color:var(--accent-2)">
+          <h3 style="color:var(--accent-2)">Next steps</h3>
+          <ul>
+            <li>Bridge model → brain: firing vs. <strong>prediction error</strong> and <strong>perceived value</strong> (the placeholders above).</li>
+            <li>Pre-outcome choice/action coding (align to cue / response).</li>
+            <li>Recover the true reward magnitudes upstream.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. Thanks / refs -->
+  <section>
+    <div class="center">
+      <h1 style="font-size:1.6em;">Thank you</h1>
+      <p style="color:var(--muted);">Questions &amp; discussion</p>
+    </div>
+    <p class="footnote" style="margin-top:1.4em;">
+      <strong>References.</strong>
+      Montijn et&nbsp;al., <em>eLife</em> 2021 (ZETA) ·
+      Mathys et&nbsp;al., <em>Front. Hum. Neurosci.</em> 2011/2014 (HGF) ·
+      Rescorla &amp; Wagner 1972 (RW).
+      &nbsp;·&nbsp; Simon Jacob lab — Human Data project.
+    </p>
+  </section>
+
+</div>
+</div>
+
+<!-- reveal.js + plugins -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/math/math.js"></script>
+<script>
+  Reveal.initialize({
+    width: 1180,
+    height: 720,
+    margin: 0.045,
+    minScale: 0.2,
+    maxScale: 2.0,
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'slide',
+    katex: {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$',  right: '$',  display: false },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '\\[', right: '\\]', display: true }
+      ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+    },
+    plugins: [ RevealMath.KaTeX, RevealHighlight, RevealNotes ]
+  });
+</script>
+</body>
+</html>

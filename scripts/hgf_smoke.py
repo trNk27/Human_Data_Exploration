@@ -14,6 +14,7 @@ import jax
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analysis.hgf.data import load_session, list_sessions
+from analysis.hgf.config import OMEGA3, KAPPA
 from analysis.hgf.model import (
     SessionModel, build_hgf, simulate_session, gamble_choice_surprise,
 )
@@ -30,10 +31,11 @@ def main() -> None:
 
     # --- 1. logp evaluates and varies with parameters ---
     sm = SessionModel(sd)
-    l1 = float(sm.logp(-3.0, 1.0, 0.0))
-    l2 = float(sm.logp(-2.0, 2.0, -0.5))
-    print(f"\nlogp(-3,1,0)   = {l1:.3f}")
-    print(f"logp(-2,2,-0.5)= {l2:.3f}")
+    # logp(omega2, omega3, kappa, beta, bias); omega3/kappa at their fixed values.
+    l1 = float(sm.logp(-3.0, OMEGA3, KAPPA, 1.0, 0.0))
+    l2 = float(sm.logp(-2.0, OMEGA3, KAPPA, 2.0, -0.5))
+    print(f"\nlogp(omega2=-3, beta=1, bias=0)    = {l1:.3f}")
+    print(f"logp(omega2=-2, beta=2, bias=-0.5) = {l2:.3f}")
     assert np.isfinite(l1) and np.isfinite(l2), "logp not finite"
     assert l1 != l2, "logp does not vary with parameters"
 
@@ -61,7 +63,7 @@ def main() -> None:
     # second simulator run's internal predictions is implicit; here we just check
     # that the simulated sequence filters to a finite surprise.
     sm_sim = SessionModel(sim)
-    lsim = float(sm_sim.logp(-2.5, 2.0, -0.5))
+    lsim = float(sm_sim.logp(-2.5, OMEGA3, KAPPA, 2.0, -0.5))
     print("logp of simulated data at true params:", round(lsim, 3))
     assert np.isfinite(lsim)
 
@@ -77,8 +79,9 @@ def main() -> None:
 
 def _neg(sm, theta):
     # helper so jax.grad sees a pure function of theta=[omega2, beta, bias]
+    # (omega3, kappa held fixed at their baseline constants)
     from analysis.hgf.model import _session_logp_jit
-    return -_session_logp_jit(theta[0], theta[1], theta[2],
+    return -_session_logp_jit(theta[0], OMEGA3, KAPPA, theta[1], theta[2],
                               sm._hgf, sm._u, sm._observed, sm._y)
 
 

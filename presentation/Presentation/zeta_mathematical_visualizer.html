@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZETA & ZETA2 Neuronal Analysis Visualizer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for time-series visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+        .tab-inactive { color: #6b7280; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; font-weight: 600; }
+        canvas { width: 100% !important; }
+        .raster-canvas { height: 60px; width: 100%; border-bottom: 1px solid #e5e7eb; background: #fafafa; border-radius: 0.375rem; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen pb-12">
+
+    <div class="max-w-6xl mx-auto px-4 pt-8">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold tracking-tight text-slate-900">Neuronal ZETA Analysis</h1>
+            <p class="text-slate-500 mt-2">Interactive visualization of the Zenith of Event-based Time-locked Anomalies.</p>
+        </header>
+
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                <button id="btn-tab-single" onclick="switchTab('single')" class="tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                    Single-Sample ZETA
+                </button>
+                <button id="btn-tab-double" onclick="switchTab('double')" class="tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300">
+                    Two-Sample ZETA (ZETA2)
+                </button>
+            </nav>
+        </div>
+
+        <!-- TAB 1: Single ZETA -->
+        <div id="tab-single" class="block space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Controls -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 col-span-1 flex flex-col gap-5">
+                    <h2 class="text-lg font-semibold text-indigo-900 border-b pb-2">Neuron Parameters</h2>
+                    
+                    <div>
+                        <div class="slider-label"><span>Background Firing Rate</span> <span id="s-bg-val">20 Hz</span></div>
+                        <input type="range" id="s-bg" min="5" max="50" value="20" class="w-full accent-indigo-600" oninput="updateSingle()">
+                    </div>
+                    
+                    <div class="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                        <h3 class="text-sm font-bold text-indigo-800 mb-3">Burst 1</h3>
+                        <div class="mb-3">
+                            <div class="slider-label"><span>Latency</span> <span id="s-b1-lat-val">100 ms</span></div>
+                            <input type="range" id="s-b1-lat" min="20" max="480" value="100" class="w-full accent-indigo-500" oninput="updateSingle()">
+                        </div>
+                        <div>
+                            <div class="slider-label"><span>Strength (Spikes)</span> <span id="s-b1-str-val">10</span></div>
+                            <input type="range" id="s-b1-str" min="0" max="30" value="10" class="w-full accent-indigo-500" oninput="updateSingle()">
+                        </div>
+                    </div>
+
+                    <div class="p-3 bg-teal-50 rounded-lg border border-teal-100">
+                        <h3 class="text-sm font-bold text-teal-800 mb-3">Burst 2</h3>
+                        <div class="mb-3">
+                            <div class="slider-label"><span>Latency</span> <span id="s-b2-lat-val">300 ms</span></div>
+                            <input type="range" id="s-b2-lat" min="20" max="480" value="300" class="w-full accent-teal-500" oninput="updateSingle()">
+                        </div>
+                        <div>
+                            <div class="slider-label"><span>Strength (Spikes)</span> <span id="s-b2-str-val">0</span></div>
+                            <input type="range" id="s-b2-str" min="0" max="30" value="0" class="w-full accent-teal-500" oninput="updateSingle()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualizations -->
+                <div class="col-span-1 md:col-span-2 space-y-4">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Spike Raster</h3>
+                        <canvas id="single-raster" class="raster-canvas"></canvas>
+                    </div>
+                    
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Cumulative Distribution</h3>
+                        <div class="relative h-48 w-full"><canvas id="single-cumulative"></canvas></div>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-sm font-semibold text-slate-700">ZETA Deviation (Actual - Expected)</h3>
+                            <span id="single-zenith-label" class="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-bold rounded">Zenith: --</span>
+                        </div>
+                        <div class="relative h-48 w-full"><canvas id="single-deviation"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Two-Sample ZETA -->
+        <div id="tab-double" class="hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Controls -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 col-span-1 flex flex-col gap-5">
+                    <h2 class="text-lg font-semibold text-indigo-900 border-b pb-2">Trial Conditions</h2>
+                    
+                    <div>
+                        <div class="slider-label"><span>Shared Background Rate</span> <span id="d-bg-val">15 Hz</span></div>
+                        <input type="range" id="d-bg" min="5" max="50" value="15" class="w-full accent-slate-600" oninput="updateDouble()">
+                    </div>
+                    
+                    <div class="p-3 bg-rose-50 rounded-lg border border-rose-100">
+                        <h3 class="text-sm font-bold text-rose-800 mb-3">Condition A</h3>
+                        <div class="mb-3">
+                            <div class="slider-label"><span>Burst Latency</span> <span id="d-a-lat-val">150 ms</span></div>
+                            <input type="range" id="d-a-lat" min="20" max="480" value="150" class="w-full accent-rose-500" oninput="updateDouble()">
+                        </div>
+                        <div>
+                            <div class="slider-label"><span>Burst Strength</span> <span id="d-a-str-val">12</span></div>
+                            <input type="range" id="d-a-str" min="0" max="30" value="12" class="w-full accent-rose-500" oninput="updateDouble()">
+                        </div>
+                    </div>
+
+                    <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                        <h3 class="text-sm font-bold text-blue-800 mb-3">Condition B</h3>
+                        <div class="mb-3">
+                            <div class="slider-label"><span>Burst Latency</span> <span id="d-b-lat-val">300 ms</span></div>
+                            <input type="range" id="d-b-lat" min="20" max="480" value="300" class="w-full accent-blue-500" oninput="updateDouble()">
+                        </div>
+                        <div>
+                            <div class="slider-label"><span>Burst Strength</span> <span id="d-b-str-val">12</span></div>
+                            <input type="range" id="d-b-str" min="0" max="30" value="12" class="w-full accent-blue-500" oninput="updateDouble()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualizations -->
+                <div class="col-span-1 md:col-span-2 space-y-4">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Dual Spike Raster</h3>
+                        <div class="relative">
+                            <span class="absolute left-1 top-2 text-[10px] font-bold text-rose-600">A</span>
+                            <span class="absolute left-1 bottom-2 text-[10px] font-bold text-blue-600">B</span>
+                            <canvas id="double-raster" class="raster-canvas"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Cumulative Distributions</h3>
+                        <div class="relative h-48 w-full"><canvas id="double-cumulative"></canvas></div>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-sm font-semibold text-slate-700">ZETA2 Difference (Cond A - Cond B)</h3>
+                            <span id="double-zenith-label" class="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-bold rounded">Zenith: --</span>
+                        </div>
+                        <div class="relative h-48 w-full"><canvas id="double-deviation"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Constants & Global State
+        const DURATION = 500; // ms
+        let charts = { single: {}, double: {} };
+
+        // Configuration for standardizing chart appearance
+        Chart.defaults.font.family = "'Inter', sans-serif";
+        Chart.defaults.elements.point.radius = 0; // Hide dots on lines by default
+        Chart.defaults.elements.line.tension = 0.1;
+
+        // --- MATH & STATS UTILITIES ---
+        
+        // Generate random number with normal distribution (Box-Muller transform)
+        function randn_bm() {
+            let u = 0, v = 0;
+            while(u === 0) u = Math.random();
+            while(v === 0) v = Math.random();
+            return Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+        }
+
+        // Generate a spike train
+        function generateSpikes(bgRate, bursts) {
+            let spikes = [];
+            // Generate background spikes (Poisson-like via uniform approximation for simplicity)
+            let numBg = Math.floor((bgRate * DURATION) / 1000);
+            for(let i=0; i<numBg; i++) {
+                spikes.push(Math.random() * DURATION);
+            }
+            
+            // Generate bursts
+            bursts.forEach(burst => {
+                for(let i=0; i<burst.strength; i++) {
+                    // Normal dist centered at latency, standard deviation of 10ms
+                    let spikeTime = burst.latency + (randn_bm() * 10);
+                    // Keep within bounds
+                    if(spikeTime >= 0 && spikeTime <= DURATION) {
+                        spikes.push(spikeTime);
+                    }
+                }
+            });
+            
+            return spikes.sort((a, b) => a - b);
+        }
+
+        // Calculate cumulative spike distribution
+        function calcCumulative(spikes) {
+            let cumulative = new Array(DURATION + 1).fill(0);
+            let count = 0;
+            let spikeIdx = 0;
+            
+            for(let t = 0; t <= DURATION; t++) {
+                while(spikeIdx < spikes.length && spikes[spikeIdx] <= t) {
+                    count++;
+                    spikeIdx++;
+                }
+                cumulative[t] = count;
+            }
+            return cumulative;
+        }
+
+        // --- UI & TAB LOGIC ---
+        function switchTab(tab) {
+            if(tab === 'single') {
+                document.getElementById('tab-single').classList.remove('hidden');
+                document.getElementById('tab-double').classList.add('hidden');
+                document.getElementById('btn-tab-single').className = "tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm";
+                document.getElementById('btn-tab-double').className = "tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300";
+                updateSingle();
+            } else {
+                document.getElementById('tab-double').classList.remove('hidden');
+                document.getElementById('tab-single').classList.add('hidden');
+                document.getElementById('btn-tab-double').className = "tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm";
+                document.getElementById('btn-tab-single').className = "tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300";
+                updateDouble();
+            }
+        }
+
+        // Draw raster plot manually for crisp performance and neuro-authentic look
+        function drawRaster(canvasId, spikeGroups) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Adjust for high DPI displays
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+            
+            const w = rect.width;
+            const h = rect.height;
+            
+            ctx.clearRect(0, 0, w, h);
+            
+            const numGroups = spikeGroups.length;
+            const rowHeight = h / numGroups;
+            const tickHeight = rowHeight * 0.6;
+            
+            spikeGroups.forEach((group, idx) => {
+                const yCenter = (idx * rowHeight) + (rowHeight / 2);
+                ctx.strokeStyle = group.color || '#374151';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                
+                group.spikes.forEach(time => {
+                    const x = (time / DURATION) * w;
+                    ctx.moveTo(x, yCenter - tickHeight/2);
+                    ctx.lineTo(x, yCenter + tickHeight/2);
+                });
+                ctx.stroke();
+            });
+        }
+
+        // Initialize all line charts
+        function initCharts() {
+            const xLabels = Array.from({length: DURATION + 1}, (_, i) => i);
+
+            // Single Cumulative
+            charts.single.cumulative = new Chart(document.getElementById('single-cumulative').getContext('2d'), {
+                type: 'line',
+                data: { labels: xLabels, datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { 
+                        x: { display: true, title: { display: true, text: 'Time (ms)' }, max: DURATION, ticks: { maxTicksLimit: 11 } },
+                        y: { title: { display: true, text: 'Cumulative Spikes' } }
+                    },
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+
+            // Single Deviation
+            charts.single.deviation = new Chart(document.getElementById('single-deviation').getContext('2d'), {
+                type: 'line',
+                data: { labels: xLabels, datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { display: true, title: { display: true, text: 'Time (ms)' }, max: DURATION, ticks: { maxTicksLimit: 11 } },
+                        y: { title: { display: true, text: 'Deviation' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // Double Cumulative
+            charts.double.cumulative = new Chart(document.getElementById('double-cumulative').getContext('2d'), {
+                type: 'line',
+                data: { labels: xLabels, datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { display: true, title: { display: true, text: 'Time (ms)' }, max: DURATION, ticks: { maxTicksLimit: 11 } },
+                        y: { title: { display: true, text: 'Cumulative Spikes' } }
+                    },
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+
+            // Double Deviation
+            charts.double.deviation = new Chart(document.getElementById('double-deviation').getContext('2d'), {
+                type: 'line',
+                data: { labels: xLabels, datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { display: true, title: { display: true, text: 'Time (ms)' }, max: DURATION, ticks: { maxTicksLimit: 11 } },
+                        y: { title: { display: true, text: 'Difference (A - B)' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // Update logic for Single ZETA
+        function updateSingle() {
+            // 1. Get values
+            const bgRate = parseInt(document.getElementById('s-bg').value);
+            const b1Lat = parseInt(document.getElementById('s-b1-lat').value);
+            const b1Str = parseInt(document.getElementById('s-b1-str').value);
+            const b2Lat = parseInt(document.getElementById('s-b2-lat').value);
+            const b2Str = parseInt(document.getElementById('s-b2-str').value);
+
+            // Update UI labels
+            document.getElementById('s-bg-val').innerText = bgRate + ' Hz';
+            document.getElementById('s-b1-lat-val').innerText = b1Lat + ' ms';
+            document.getElementById('s-b1-str-val').innerText = b1Str;
+            document.getElementById('s-b2-lat-val').innerText = b2Lat + ' ms';
+            document.getElementById('s-b2-str-val').innerText = b2Str;
+
+            // 2. Generate Data
+            const bursts = [ {latency: b1Lat, strength: b1Str}, {latency: b2Lat, strength: b2Str} ];
+            const spikes = generateSpikes(bgRate, bursts);
+            const cumulative = calcCumulative(spikes);
+            const totalSpikes = cumulative[DURATION];
+
+            // 3. Compute Null and Deviation
+            const nullCurve = [];
+            const deviation = [];
+            let zenithVal = 0;
+            let zenithIdx = 0;
+
+            for(let t = 0; t <= DURATION; t++) {
+                let expected = (totalSpikes / DURATION) * t;
+                nullCurve.push(expected);
+                let dev = cumulative[t] - expected;
+                deviation.push(dev);
+                
+                if(Math.abs(dev) > Math.abs(zenithVal)) {
+                    zenithVal = dev;
+                    zenithIdx = t;
+                }
+            }
+
+            // Update Zenith Label
+            document.getElementById('single-zenith-label').innerText = `Zenith: ${zenithIdx} ms`;
+
+            // 4. Update Visuals
+            drawRaster('single-raster', [{ spikes: spikes, color: '#4f46e5' }]);
+
+            charts.single.cumulative.data.datasets = [
+                { label: 'Actual Cum. Spikes', data: cumulative, borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.1)', stepped: true, fill: true },
+                { label: 'Null Hypothesis (Expected)', data: nullCurve, borderColor: '#9ca3af', borderDash: [5, 5] }
+            ];
+            charts.single.cumulative.update();
+
+            // Zenith point dataset
+            const zenithData = new Array(DURATION+1).fill(null);
+            zenithData[zenithIdx] = zenithVal;
+
+            charts.single.deviation.data.datasets = [
+                { label: 'Deviation', data: deviation, borderColor: '#9333ea', backgroundColor: 'rgba(147, 51, 234, 0.2)', fill: true },
+                { label: 'Zenith', data: zenithData, backgroundColor: '#ef4444', borderColor: '#ef4444', pointRadius: 6, pointStyle: 'circle' }
+            ];
+            charts.single.deviation.update();
+        }
+
+        // Update logic for Two-Sample ZETA
+        function updateDouble() {
+            // 1. Get values
+            const bgRate = parseInt(document.getElementById('d-bg').value);
+            const aLat = parseInt(document.getElementById('d-a-lat').value);
+            const aStr = parseInt(document.getElementById('d-a-str').value);
+            const bLat = parseInt(document.getElementById('d-b-lat').value);
+            const bStr = parseInt(document.getElementById('d-b-str').value);
+
+            // Update UI labels
+            document.getElementById('d-bg-val').innerText = bgRate + ' Hz';
+            document.getElementById('d-a-lat-val').innerText = aLat + ' ms';
+            document.getElementById('d-a-str-val').innerText = aStr;
+            document.getElementById('d-b-lat-val').innerText = bLat + ' ms';
+            document.getElementById('d-b-str-val').innerText = bStr;
+
+            // 2. Generate Data
+            const spikesA = generateSpikes(bgRate, [{latency: aLat, strength: aStr}]);
+            const spikesB = generateSpikes(bgRate, [{latency: bLat, strength: bStr}]);
+            
+            const cumA = calcCumulative(spikesA);
+            const cumB = calcCumulative(spikesB);
+
+            // 3. Compute Difference
+            const difference = [];
+            let zenithVal = 0;
+            let zenithIdx = 0;
+
+            for(let t = 0; t <= DURATION; t++) {
+                let diff = cumA[t] - cumB[t];
+                difference.push(diff);
+                
+                if(Math.abs(diff) > Math.abs(zenithVal)) {
+                    zenithVal = diff;
+                    zenithIdx = t;
+                }
+            }
+
+            // Update Zenith Label
+            document.getElementById('double-zenith-label').innerText = `Two-Sample Zenith: ${zenithIdx} ms`;
+
+            // 4. Update Visuals
+            drawRaster('double-raster', [
+                { spikes: spikesA, color: '#e11d48' }, // Rose 600
+                { spikes: spikesB, color: '#2563eb' }  // Blue 600
+            ]);
+
+            charts.double.cumulative.data.datasets = [
+                { label: 'Condition A', data: cumA, borderColor: '#e11d48', stepped: true },
+                { label: 'Condition B', data: cumB, borderColor: '#2563eb', stepped: true }
+            ];
+            charts.double.cumulative.update();
+
+            // Zenith point dataset
+            const zenithData = new Array(DURATION+1).fill(null);
+            zenithData[zenithIdx] = zenithVal;
+
+            charts.double.deviation.data.datasets = [
+                { label: 'Difference (A - B)', data: difference, borderColor: '#9333ea', backgroundColor: 'rgba(147, 51, 234, 0.2)', fill: true },
+                { label: 'Zenith', data: zenithData, backgroundColor: '#f59e0b', borderColor: '#f59e0b', pointRadius: 6, pointStyle: 'circle' }
+            ];
+            charts.double.deviation.update();
+        }
+
+        // Initialization
+        window.onload = function() {
+            initCharts();
+            updateSingle(); // Populate first tab
+            
+            // Handle window resize for custom canvas rasters
+            window.addEventListener('resize', () => {
+                if(!document.getElementById('tab-single').classList.contains('hidden')) updateSingle();
+                if(!document.getElementById('tab-double').classList.contains('hidden')) updateDouble();
+            });
+        };
+    </script>
+</body>
+</html>

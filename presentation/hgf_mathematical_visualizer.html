@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HGF Visualizer — Perceived Probability & Prediction Error</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for time-series visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+        .tab-inactive { color: #6b7280; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.875rem; color: #374151; margin-bottom: 0.25rem; font-weight: 600; }
+        canvas { width: 100% !important; }
+        .raster-canvas { height: 46px; width: 100%; border-bottom: 1px solid #e5e7eb; background: #fafafa; border-radius: 0.375rem; }
+        .eqn { font-family: 'Cambria Math', 'Times New Roman', serif; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen pb-12">
+
+    <div class="max-w-6xl mx-auto px-4 pt-8">
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold tracking-tight text-slate-900">Hierarchical Gaussian Filter</h1>
+            <p class="text-slate-500 mt-2">How a subject's <span class="font-semibold text-indigo-600">perceived probability</span> tracks a changing reward world, and the <span class="font-semibold text-rose-600">prediction error</span> that drives every update.</p>
+        </header>
+
+        <!-- How it works -->
+        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 mb-6">
+            <h2 class="text-sm font-semibold text-indigo-900 mb-2">The update, in one line per step</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700 eqn">
+                <p><b>Predict:</b> &nbsp; p̂<sub>t</sub> = &sigma;(μ̂₂) &nbsp;— the perceived P(reward) <i>before</i> seeing the outcome.</p>
+                <p><b>Surprise:</b> &nbsp; &delta;₁ = u<sub>t</sub> − p̂<sub>t</sub> &nbsp;— prediction error (outcome − belief).</p>
+                <p><b>Learn:</b> &nbsp; μ₂ ← μ̂₂ + (1/π₂)·&delta;₁ &nbsp;— belief moves toward the outcome.</p>
+                <p><b>Adapt:</b> &nbsp; learning rate = 1/π₂ rises with perceived <i>volatility</i> (level 3).</p>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">3-level binary HGF (Mathys et&nbsp;al. 2014), the model fit in <span class="eqn">analysis/hgf/model.py</span>. ω₂ is the one perceptual parameter the project actually fits; ω₃ and κ are fixed by default.</p>
+        </div>
+
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                <button id="btn-tab-single" onclick="switchTab('single')" class="tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                    Belief tracking
+                </button>
+                <button id="btn-tab-compare" onclick="switchTab('compare')" class="tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300">
+                    Fast vs. slow learner
+                </button>
+            </nav>
+        </div>
+
+        <!-- Shared task controls -->
+        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-slate-800">The task <span class="text-sm font-normal text-slate-400">— the reward world both tabs see</span></h2>
+                <button id="btn-new" class="px-3 py-1.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 shadow-sm">↻ New outcomes</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                <div>
+                    <div class="slider-label"><span>Trials</span> <span id="t-trials-val">80</span></div>
+                    <input type="range" id="t-trials" min="30" max="200" value="80" step="5" class="w-full accent-slate-600">
+                </div>
+                <div>
+                    <div class="slider-label"><span>Reversals (world changes)</span> <span id="t-rev-val">4</span></div>
+                    <input type="range" id="t-rev" min="0" max="12" value="4" step="1" class="w-full accent-slate-600">
+                </div>
+                <div>
+                    <div class="slider-label"><span>Feedback (trials observed)</span> <span id="t-obs-val">100%</span></div>
+                    <input type="range" id="t-obs" min="30" max="100" value="100" step="5" class="w-full accent-slate-600">
+                </div>
+            </div>
+            <p class="text-xs text-slate-400 mt-3">Gamble win-probability switches between the task's levels {0.1, 0.2, 0.4, 0.8}. Below 100% feedback, unobserved trials get no outcome — the belief <i>diffuses</i> and uncertainty grows, exactly as on the real task's safe-choice trials.</p>
+        </div>
+
+        <!-- TAB 1: Single agent -->
+        <div id="tab-single" class="block space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Controls -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 col-span-1 flex flex-col gap-5 self-start">
+                    <h2 class="text-lg font-semibold text-indigo-900 border-b pb-2">HGF parameters</h2>
+
+                    <div class="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                        <div class="slider-label"><span>ω₂ — tonic volatility <span class="font-normal text-indigo-500">(the fitted one)</span></span> <span id="s-o2-val">−3.0</span></div>
+                        <input type="range" id="s-o2" min="-8" max="0" value="-3" step="0.25" class="w-full accent-indigo-600">
+                        <p class="text-xs text-slate-500 mt-1">Higher ω₂ → faster, jumpier learning. Lower → slow, smooth, stubborn beliefs.</p>
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>ω₃ — meta-volatility</span> <span id="s-o3-val">−4.0</span></div>
+                        <input type="range" id="s-o3" min="-8" max="-1" value="-4" step="0.25" class="w-full accent-violet-500">
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>κ — volatility coupling</span> <span id="s-k-val">1.0</span></div>
+                        <input type="range" id="s-k" min="0" max="2" value="1" step="0.1" class="w-full accent-violet-500">
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>Initial belief p̂₀</span> <span id="s-p0-val">0.50</span></div>
+                        <input type="range" id="s-p0" min="0.05" max="0.95" value="0.5" step="0.05" class="w-full accent-slate-500">
+                    </div>
+
+                    <button id="btn-reset" class="mt-1 px-3 py-1.5 bg-slate-100 text-slate-600 text-sm font-semibold rounded-lg hover:bg-slate-200">Reset to fitted defaults</button>
+                </div>
+
+                <!-- Visualizations -->
+                <div class="col-span-1 md:col-span-2 space-y-4">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Outcomes <span class="font-normal text-slate-400">— <span class="text-emerald-600">▮</span> reward &nbsp; <span class="text-slate-400">▮</span> no reward &nbsp; <span class="text-slate-300">▯</span> unobserved</span></h3>
+                        <canvas id="single-raster" class="raster-canvas"></canvas>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Perceived probability p̂ vs. the true world</h3>
+                        <div class="relative h-64 w-full"><canvas id="single-belief"></canvas></div>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-sm font-semibold text-slate-700">Prediction error δ₁ = outcome − p̂</h3>
+                            <span id="single-pe-label" class="px-2 py-1 bg-rose-100 text-rose-800 text-xs font-bold rounded">mean |δ₁|: --</span>
+                        </div>
+                        <div class="relative h-40 w-full"><canvas id="single-pe"></canvas></div>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Inside the model <span class="font-normal text-slate-400">— adaptive learning rate (1/π₂) &amp; estimated volatility (μ₃)</span></h3>
+                        <div class="relative h-40 w-full"><canvas id="single-internals"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Compare -->
+        <div id="tab-compare" class="hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Controls -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 col-span-1 flex flex-col gap-5 self-start">
+                    <h2 class="text-lg font-semibold text-indigo-900 border-b pb-2">Two learners, one world</h2>
+                    <p class="text-sm text-slate-500">Same outcomes, two values of ω₂. This is the parameter the HGF fit recovers per subject — it sets how quickly beliefs chase the evidence.</p>
+
+                    <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                        <div class="slider-label"><span>Slow learner — ω₂</span> <span id="c-a-val">−5.0</span></div>
+                        <input type="range" id="c-a" min="-8" max="0" value="-5" step="0.25" class="w-full accent-blue-600">
+                    </div>
+                    <div class="p-3 bg-rose-50 rounded-lg border border-rose-100">
+                        <div class="slider-label"><span>Fast learner — ω₂</span> <span id="c-b-val">−1.5</span></div>
+                        <input type="range" id="c-b" min="-8" max="0" value="-1.5" step="0.25" class="w-full accent-rose-600">
+                    </div>
+
+                    <div class="text-sm text-slate-600 border-t pt-3 space-y-1">
+                        <div class="flex justify-between"><span class="text-blue-700 font-semibold">Slow: mean |δ₁|</span><span id="c-a-pe">--</span></div>
+                        <div class="flex justify-between"><span class="text-rose-700 font-semibold">Fast: mean |δ₁|</span><span id="c-b-pe">--</span></div>
+                        <p class="text-xs text-slate-400 pt-1">The fast learner reacts to noise (smaller errors after switches, but more jitter on stable runs). The slow learner is calmer but lags real changes.</p>
+                    </div>
+                </div>
+
+                <!-- Visualizations -->
+                <div class="col-span-1 md:col-span-2 space-y-4">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Outcomes</h3>
+                        <canvas id="compare-raster" class="raster-canvas"></canvas>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Perceived probability p̂ — slow vs. fast</h3>
+                        <div class="relative h-72 w-full"><canvas id="compare-belief"></canvas></div>
+                    </div>
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">|Prediction error| over the task</h3>
+                        <div class="relative h-40 w-full"><canvas id="compare-pe"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================================
+        //  STATE & CONSTANTS
+        // =====================================================================
+        const LEVELS = [0.1, 0.2, 0.4, 0.8];   // task's gamble win-probabilities
+        const FITTED = { omega2: -3.0, omega3: -4.0, kappa: 1.0, p0: 0.5 };  // config defaults
+
+        let seed = 42;             // outcome RNG seed; "New outcomes" bumps it
+        let task = null;           // {schedule, outcomes, observed, n}
+        const charts = {};
+
+        Chart.defaults.font.family = "'Inter', sans-serif";
+        Chart.defaults.elements.point.radius = 0;
+        Chart.defaults.elements.line.tension = 0.15;
+        Chart.defaults.animation = false;
+
+        const sigmoid = x => 1 / (1 + Math.exp(-x));
+        const logit   = p => Math.log(p / (1 - p));
+
+        // Deterministic PRNG so a fixed task stays put while HGF sliders move.
+        function mulberry32(a) {
+            return function () {
+                a |= 0; a = a + 0x6D2B79F5 | 0;
+                let t = Math.imul(a ^ a >>> 15, 1 | a);
+                t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+
+        // =====================================================================
+        //  TASK GENERATION  (a switching reward world + binary outcomes)
+        // =====================================================================
+        function buildTask(n, reversals, obsFrac, seedVal) {
+            const rnd = mulberry32(seedVal);
+            reversals = Math.min(reversals, Math.max(0, Math.floor(n / 6) - 1));
+            const nBlocks = reversals + 1;
+
+            // Block boundaries: roughly even, jittered, strictly increasing.
+            const bounds = [0];
+            for (let i = 1; i < nBlocks; i++) {
+                const base = Math.round(i * n / nBlocks);
+                const jit = Math.round((rnd() - 0.5) * (n / nBlocks) * 0.5);
+                bounds.push(Math.min(n - 3, Math.max(bounds[i - 1] + 3, base + jit)));
+            }
+            bounds.push(n);
+
+            // Assign a level to each block; adjacent blocks must differ.
+            const schedule = new Array(n);
+            let prev = -1;
+            for (let b = 0; b < nBlocks; b++) {
+                let lvl;
+                do { lvl = LEVELS[Math.floor(rnd() * LEVELS.length)]; } while (lvl === prev);
+                prev = lvl;
+                for (let t = bounds[b]; t < bounds[b + 1]; t++) schedule[t] = lvl;
+            }
+
+            // Bernoulli outcomes from the true schedule; observation mask.
+            const outcomes = schedule.map(p => (rnd() < p ? 1 : 0));
+            const observed = schedule.map(() => (rnd() < obsFrac ? 1 : 0));
+            return { schedule, outcomes, observed, n };
+        }
+
+        // =====================================================================
+        //  THE HGF  — 3-level binary update (faithful to analysis/hgf/model.py)
+        // =====================================================================
+        function runHGF(task, p) {
+            const { outcomes, observed, n } = task;
+            // Initial beliefs (config: mean 0 / precision 1 at every level).
+            let mu2 = logit(p.p0), sa2 = 1.0;     // level 2: logit win-prob
+            let mu3 = 0.0,         sa3 = 1.0;     // level 3: log-volatility
+            const out = { phat: [], pe: [], lr: [], mu3: [], pUp: [], pLo: [] };
+
+            for (let k = 0; k < n; k++) {
+                // --- Prediction step ---
+                const mu2hat = mu2, mu3hat = mu3;
+                const phat = sigmoid(mu2hat);                 // perceived P(reward)
+                const nu2 = Math.exp(p.kappa * mu3hat + p.omega2);
+                const sa2hat = sa2 + nu2;                     // predicted variance, L2
+                const pihat2 = 1 / sa2hat;
+                const nu3 = Math.exp(p.omega3);
+                const sa3hat = sa3 + nu3;
+                const pihat3 = 1 / sa3hat;
+
+                // Predicted uncertainty band, mapped to probability space.
+                const sd2 = Math.sqrt(sa2hat);
+                out.pUp.push(sigmoid(mu2hat + sd2));
+                out.pLo.push(sigmoid(mu2hat - sd2));
+                out.phat.push(phat);
+                out.mu3.push(mu3hat);
+
+                if (observed[k] === 1) {
+                    // --- Update step (outcome seen) ---
+                    const u = outcomes[k];
+                    const da1 = u - phat;                     // level-1 prediction error
+                    const pi2 = pihat2 + phat * (1 - phat);
+                    sa2 = 1 / pi2;
+                    mu2 = mu2hat + sa2 * da1;                 // learning rate = sa2 = 1/pi2
+
+                    // Level 3 (volatility) update.
+                    const da2 = (sa2 + (mu2 - mu2hat) ** 2) * pihat2 - 1;
+                    const w2 = nu2 * pihat2;
+                    let pi3 = pihat3 + 0.5 * p.kappa * p.kappa * w2 * (w2 + (2 * w2 - 1) * da2);
+                    if (pi3 < 1e-6) pi3 = 1e-6;               // keep precision positive
+                    sa3 = 1 / pi3;
+                    mu3 = mu3hat + 0.5 * sa3 * p.kappa * w2 * da2;
+
+                    out.pe.push(da1);
+                    out.lr.push(sa2);
+                } else {
+                    // --- No outcome: belief diffuses, uncertainty grows ---
+                    sa2 = Math.min(sa2hat, 100);             // cap to keep plots finite
+                    sa3 = sa3hat;
+                    out.pe.push(null);
+                    out.lr.push(null);
+                }
+            }
+            return out;
+        }
+
+        const meanAbs = arr => {
+            const v = arr.filter(x => x !== null);
+            return v.length ? v.reduce((s, x) => s + Math.abs(x), 0) / v.length : 0;
+        };
+
+        // =====================================================================
+        //  RASTER  (one tick per trial: up=reward, down=no-reward, faint=unobs.)
+        // =====================================================================
+        function drawRaster(canvasId) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width === 0) return;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const w = rect.width, h = rect.height, mid = h / 2;
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+
+            const { outcomes, observed, n } = task;
+            const colW = w / n;
+            const tick = Math.min(h * 0.4, mid - 3);
+            for (let i = 0; i < n; i++) {
+                const x = (i + 0.5) * colW;
+                ctx.lineWidth = Math.max(1, Math.min(3, colW * 0.5));
+                ctx.beginPath();
+                if (observed[i] === 0) {
+                    ctx.strokeStyle = '#e2e8f0';            // unobserved: faint, both sides
+                    ctx.moveTo(x, mid - tick * 0.5); ctx.lineTo(x, mid + tick * 0.5);
+                } else if (outcomes[i] === 1) {
+                    ctx.strokeStyle = '#10b981';            // reward: up tick
+                    ctx.moveTo(x, mid); ctx.lineTo(x, mid - tick);
+                } else {
+                    ctx.strokeStyle = '#94a3b8';            // no reward: down tick
+                    ctx.moveTo(x, mid); ctx.lineTo(x, mid + tick);
+                }
+                ctx.stroke();
+            }
+        }
+
+        // =====================================================================
+        //  CHART SETUP
+        // =====================================================================
+        function xLabels() { return Array.from({ length: task.n }, (_, i) => i + 1); }
+
+        const beliefScales = () => ({
+            x: { title: { display: true, text: 'Trial' }, ticks: { maxTicksLimit: 12 } },
+            y: { min: 0, max: 1, title: { display: true, text: 'P(reward)' } }
+        });
+
+        function initCharts() {
+            charts.belief = new Chart(document.getElementById('single-belief'), {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: beliefScales(),
+                    plugins: { legend: { position: 'top', labels: { filter: i => !i.text.startsWith('band'), usePointStyle: true, boxWidth: 8 } } }
+                }
+            });
+
+            charts.pe = new Chart(document.getElementById('single-pe'), {
+                type: 'bar',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { title: { display: true, text: 'Trial' }, ticks: { maxTicksLimit: 12 } },
+                        y: { min: -1, max: 1, title: { display: true, text: 'δ₁' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            charts.internals = new Chart(document.getElementById('single-internals'), {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { title: { display: true, text: 'Trial' }, ticks: { maxTicksLimit: 12 } },
+                        y: { position: 'left', title: { display: true, text: 'learning rate' }, beginAtZero: true },
+                        y2: { position: 'right', title: { display: true, text: 'μ₃ (volatility)' }, grid: { drawOnChartArea: false } }
+                    },
+                    plugins: { legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } } }
+                }
+            });
+
+            charts.cBelief = new Chart(document.getElementById('compare-belief'), {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: beliefScales(),
+                    plugins: { legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } } }
+                }
+            });
+
+            charts.cPe = new Chart(document.getElementById('compare-pe'), {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { title: { display: true, text: 'Trial' }, ticks: { maxTicksLimit: 12 } },
+                        y: { min: 0, max: 1, title: { display: true, text: '|δ₁|' } }
+                    },
+                    plugins: { legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } } }
+                }
+            });
+        }
+
+        // =====================================================================
+        //  RENDER — SINGLE AGENT
+        // =====================================================================
+        function readSingleParams() {
+            return {
+                omega2: parseFloat(document.getElementById('s-o2').value),
+                omega3: parseFloat(document.getElementById('s-o3').value),
+                kappa: parseFloat(document.getElementById('s-k').value),
+                p0: parseFloat(document.getElementById('s-p0').value)
+            };
+        }
+
+        function refreshSingle() {
+            const p = readSingleParams();
+            document.getElementById('s-o2-val').innerText = p.omega2.toFixed(2).replace('-', '−');
+            document.getElementById('s-o3-val').innerText = p.omega3.toFixed(2).replace('-', '−');
+            document.getElementById('s-k-val').innerText = p.kappa.toFixed(1);
+            document.getElementById('s-p0-val').innerText = p.p0.toFixed(2);
+
+            const r = runHGF(task, p);
+            const L = xLabels();
+
+            drawRaster('single-raster');
+
+            charts.belief.data.labels = L;
+            charts.belief.data.datasets = [
+                { label: 'band_lo', data: r.pLo, borderColor: 'transparent', pointRadius: 0, fill: false },
+                { label: 'band_hi', data: r.pUp, borderColor: 'transparent', backgroundColor: 'rgba(79,70,229,0.12)', pointRadius: 0, fill: '-1' },
+                { label: 'True P(reward)', data: task.schedule, borderColor: '#9ca3af', borderDash: [6, 4], stepped: true, pointRadius: 0, borderWidth: 1.5 },
+                { label: 'Perceived p̂', data: r.phat, borderColor: '#4f46e5', backgroundColor: '#4f46e5', borderWidth: 2.5, pointRadius: 0 }
+            ];
+            charts.belief.update();
+
+            charts.pe.data.labels = L;
+            charts.pe.data.datasets = [{
+                label: 'δ₁', data: r.pe,
+                backgroundColor: ctx => (ctx.raw >= 0 ? 'rgba(16,185,129,0.8)' : 'rgba(239,68,68,0.8)')
+            }];
+            charts.pe.update();
+            document.getElementById('single-pe-label').innerText = 'mean |δ₁|: ' + meanAbs(r.pe).toFixed(3);
+
+            charts.internals.data.labels = L;
+            charts.internals.data.datasets = [
+                { label: 'learning rate 1/π₂', data: r.lr, borderColor: '#f59e0b', backgroundColor: '#f59e0b', borderWidth: 2, pointRadius: 0, spanGaps: true, yAxisID: 'y' },
+                { label: 'μ₃ (volatility)', data: r.mu3, borderColor: '#8b5cf6', backgroundColor: '#8b5cf6', borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2' }
+            ];
+            charts.internals.update();
+        }
+
+        // =====================================================================
+        //  RENDER — COMPARE
+        // =====================================================================
+        function refreshCompare() {
+            const oa = parseFloat(document.getElementById('c-a').value);
+            const ob = parseFloat(document.getElementById('c-b').value);
+            document.getElementById('c-a-val').innerText = oa.toFixed(2).replace('-', '−');
+            document.getElementById('c-b-val').innerText = ob.toFixed(2).replace('-', '−');
+
+            const base = { omega3: FITTED.omega3, kappa: FITTED.kappa, p0: FITTED.p0 };
+            const rA = runHGF(task, { ...base, omega2: oa });
+            const rB = runHGF(task, { ...base, omega2: ob });
+            const L = xLabels();
+
+            drawRaster('compare-raster');
+
+            charts.cBelief.data.labels = L;
+            charts.cBelief.data.datasets = [
+                { label: 'True P(reward)', data: task.schedule, borderColor: '#9ca3af', borderDash: [6, 4], stepped: true, pointRadius: 0, borderWidth: 1.5 },
+                { label: `Slow learner (ω₂=${oa.toFixed(2).replace('-', '−')})`, data: rA.phat, borderColor: '#2563eb', backgroundColor: '#2563eb', borderWidth: 2.5, pointRadius: 0 },
+                { label: `Fast learner (ω₂=${ob.toFixed(2).replace('-', '−')})`, data: rB.phat, borderColor: '#e11d48', backgroundColor: '#e11d48', borderWidth: 2.5, pointRadius: 0 }
+            ];
+            charts.cBelief.update();
+
+            charts.cPe.data.labels = L;
+            charts.cPe.data.datasets = [
+                { label: 'Slow |δ₁|', data: rA.pe.map(x => x === null ? null : Math.abs(x)), borderColor: '#2563eb', backgroundColor: '#2563eb', borderWidth: 1.5, pointRadius: 0, spanGaps: true },
+                { label: 'Fast |δ₁|', data: rB.pe.map(x => x === null ? null : Math.abs(x)), borderColor: '#e11d48', backgroundColor: '#e11d48', borderWidth: 1.5, pointRadius: 0, spanGaps: true }
+            ];
+            charts.cPe.update();
+
+            document.getElementById('c-a-pe').innerText = meanAbs(rA.pe).toFixed(3);
+            document.getElementById('c-b-pe').innerText = meanAbs(rB.pe).toFixed(3);
+        }
+
+        function refreshAll() { refreshSingle(); refreshCompare(); }
+
+        // =====================================================================
+        //  TASK REBUILD + UI WIRING
+        // =====================================================================
+        function rebuildTask() {
+            const n = parseInt(document.getElementById('t-trials').value);
+            const rev = parseInt(document.getElementById('t-rev').value);
+            const obs = parseInt(document.getElementById('t-obs').value) / 100;
+            document.getElementById('t-trials-val').innerText = n;
+            document.getElementById('t-rev-val').innerText = rev;
+            document.getElementById('t-obs-val').innerText = Math.round(obs * 100) + '%';
+            task = buildTask(n, rev, obs, seed);
+        }
+
+        function switchTab(tab) {
+            const single = tab === 'single';
+            document.getElementById('tab-single').classList.toggle('hidden', !single);
+            document.getElementById('tab-compare').classList.toggle('hidden', single);
+            document.getElementById('btn-tab-single').className = single
+                ? "tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"
+                : "tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300";
+            document.getElementById('btn-tab-compare').className = !single
+                ? "tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"
+                : "tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300";
+            // Canvases sized while hidden read width 0 — redraw the now-visible tab.
+            if (single) refreshSingle(); else refreshCompare();
+        }
+
+        window.onload = function () {
+            initCharts();
+            rebuildTask();
+
+            const taskCtrls = ['t-trials', 't-rev', 't-obs'];
+            taskCtrls.forEach(id => document.getElementById(id).addEventListener('input', () => { rebuildTask(); refreshAll(); }));
+
+            ['s-o2', 's-o3', 's-k', 's-p0'].forEach(id => document.getElementById(id).addEventListener('input', refreshSingle));
+            ['c-a', 'c-b'].forEach(id => document.getElementById(id).addEventListener('input', refreshCompare));
+
+            document.getElementById('btn-new').addEventListener('click', () => { seed = (seed * 1664525 + 1013904223) >>> 0; rebuildTask(); refreshAll(); });
+
+            document.getElementById('btn-reset').addEventListener('click', () => {
+                document.getElementById('s-o2').value = FITTED.omega2;
+                document.getElementById('s-o3').value = FITTED.omega3;
+                document.getElementById('s-k').value = FITTED.kappa;
+                document.getElementById('s-p0').value = FITTED.p0;
+                refreshSingle();
+            });
+
+            refreshAll();
+
+            window.addEventListener('resize', () => {
+                if (!document.getElementById('tab-single').classList.contains('hidden')) refreshSingle();
+                else refreshCompare();
+            });
+        };
+    </script>
+</body>
+</html>
