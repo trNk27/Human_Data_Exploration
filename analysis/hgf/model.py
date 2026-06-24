@@ -105,14 +105,26 @@ def gamble_choice_surprise(hgf, response_function_inputs, response_function_para
 # ---------------------------------------------------------------------------
 
 @partial(jax.jit, static_argnames=("hgf",))
-def _session_logp_jit(omega2, beta, bias, hgf, u, observed, y):
-    """JAX log-likelihood of one session's choices given (omega2, beta, bias).
+def _session_logp_jit(omega2, omega3, kappa, beta, bias, hgf, u, observed, y):
+    """JAX log-likelihood of one session's choices given the model parameters.
 
-    ``hgf`` is a static, pre-built binary HGF for this session. ``omega2`` is
-    injected into the (constant) level-2 tonic volatility, exactly as pyhgf's
-    own ``logp`` does, then the filter runs with the partial-feedback mask.
+    ``hgf`` is a static, pre-built binary HGF for this session. The perceptual
+    parameters are injected into its (constant) attributes — exactly as pyhgf's
+    own ``logp`` does for ``omega2`` — then the filter runs with the
+    partial-feedback mask:
+
+      * ``omega2`` -> level-2 tonic volatility   (attributes[1])
+      * ``omega3`` -> level-3 tonic volatility   (attributes[2])
+      * ``kappa``  -> volatility coupling between levels 2 and 3 (the coupling
+        strength stored on both the child (node 2) and parent (node 3)).
+
+    For the baseline 3-parameter fit ``omega3``/``kappa`` are passed as their
+    fixed constants, so the result is identical to injecting only ``omega2``.
     """
     hgf.attributes[1]["tonic_volatility"] = omega2
+    hgf.attributes[2]["tonic_volatility"] = omega3
+    hgf.attributes[1]["volatility_coupling_parents"] = (kappa,)
+    hgf.attributes[2]["volatility_coupling_children"] = (kappa,)
     # Pass `observed` pre-wrapped as a per-input-node tuple: a traced JAX array is
     # not an np.ndarray, so pyhgf would not wrap it itself.
     surprise = hgf.input_data(input_data=u, observed=(observed,)).surprise(
@@ -139,19 +151,25 @@ class SessionModel:
         self._observed = jnp.asarray(sd.observed, dtype=int)
         self._y = jnp.asarray(sd.y, dtype=float)
 
-    def logp(self, omega2: float, beta: float, bias: float) -> float:
-        """Log-likelihood of the choices under (omega2, beta, bias)."""
+    def logp(self, omega2: float, omega3: float, kappa: float,
+             beta: float, bias: float) -> float:
+        """Log-likelihood of the choices under the (perceptual + response) params."""
         return _session_logp_jit(
-            jnp.asarray(omega2, float), jnp.asarray(beta, float), jnp.asarray(bias, float),
+            jnp.asarray(omega2, float), jnp.asarray(omega3, float), jnp.asarray(kappa, float),
+            jnp.asarray(beta, float), jnp.asarray(bias, float),
             self._hgf, self._u, self._observed, self._y,
         )
 
-    def neg_logp(self, omega2: float, beta: float, bias: float) -> float:
-        return -self.logp(omega2, beta, bias)
+    def neg_logp(self, omega2: float, omega3: float, kappa: float,
+                 beta: float, bias: float) -> float:
+        return -self.logp(omega2, omega3, kappa, beta, bias)
 
-    def trajectories(self, omega2: float):
-        """Run the filter at ``omega2`` and return the pyhgf trajectory DataFrame."""
+    def trajectories(self, omega2: float, omega3: float = OMEGA3, kappa: float = KAPPA):
+        """Run the filter at the given perceptual params; return the trajectory DataFrame."""
         self._hgf.attributes[1]["tonic_volatility"] = float(omega2)
+        self._hgf.attributes[2]["tonic_volatility"] = float(omega3)
+        self._hgf.attributes[1]["volatility_coupling_parents"] = (float(kappa),)
+        self._hgf.attributes[2]["volatility_coupling_children"] = (float(kappa),)
         self._hgf.input_data(input_data=self.sd.u, observed=self.sd.observed)
         return self._hgf.to_pandas()
 

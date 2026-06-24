@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .config import SEED
+from .config import SEED, BASELINE, NATURAL_DEFAULTS, ParamSpace
 from .model import simulate_session
 from .fit import separate_map_fit
 from .data import SessionData
@@ -26,19 +26,22 @@ from .model import SessionModel
 
 def _sim_pair(base: dict, shift_param: str, shift_size: float,
               sched_a: np.ndarray, sched_b: np.ndarray,
-              seed_a: int, seed_b: int, n_restarts: int = 4) -> dict:
+              seed_a: int, seed_b: int, space: ParamSpace = BASELINE,
+              n_restarts: int = 4) -> dict:
     """Simulate two sessions — base params and base+shift — then refit each."""
     params_a = dict(base)
     params_b = dict(base)
     params_b[shift_param] = base[shift_param] + shift_size
 
-    sd_a = simulate_session(params_a["omega2"], params_a["beta"], params_a["bias"],
-                            p_schedule=sched_a, seed=seed_a)
-    sd_b = simulate_session(params_b["omega2"], params_b["beta"], params_b["bias"],
-                            p_schedule=sched_b, seed=seed_b)
+    sd_a = simulate_session(omega2=params_a["omega2"], beta=params_a["beta"], bias=params_a["bias"],
+                            p_schedule=sched_a, seed=seed_a,
+                            omega3=params_a["omega3"], kappa=params_a["kappa"])
+    sd_b = simulate_session(omega2=params_b["omega2"], beta=params_b["beta"], bias=params_b["bias"],
+                            p_schedule=sched_b, seed=seed_b,
+                            omega3=params_b["omega3"], kappa=params_b["kappa"])
 
-    fit_a = separate_map_fit(SessionModel(sd_a), n_restarts=n_restarts, seed=seed_a)
-    fit_b = separate_map_fit(SessionModel(sd_b), n_restarts=n_restarts, seed=seed_b)
+    fit_a = separate_map_fit(SessionModel(sd_a), space=space, n_restarts=n_restarts, seed=seed_a)
+    fit_b = separate_map_fit(SessionModel(sd_b), space=space, n_restarts=n_restarts, seed=seed_b)
 
     rec_a = fit_a.natural
     rec_b = fit_b.natural
@@ -60,7 +63,8 @@ def power_check(schedules: list[np.ndarray],
                 shift_sizes: dict[str, list[float]] | None = None,
                 n_sims: int = 20,
                 n_restarts: int = 4,
-                seed: int = SEED) -> pd.DataFrame:
+                seed: int = SEED,
+                space: ParamSpace = BASELINE) -> pd.DataFrame:
     """Simulate n_sims session pairs at each shift size and measure recovery.
 
     Parameters
@@ -78,7 +82,9 @@ def power_check(schedules: list[np.ndarray],
         Number of simulated pairs per (param, shift) combination.
     """
     if base_params is None:
-        base_params = {"omega2": -1.7, "beta": 1.3, "bias": -1.2}
+        base_params = {**NATURAL_DEFAULTS, "omega2": -1.7, "beta": 1.3, "bias": -1.2}
+    else:
+        base_params = {**NATURAL_DEFAULTS, **base_params}   # ensure all 5 keys present
     if shift_sizes is None:
         shift_sizes = {
             "omega2": [0.5, 1.0, 1.5, 2.0],
@@ -98,7 +104,7 @@ def power_check(schedules: list[np.ndarray],
                 seed_b = int(rng.integers(1, 2**31))
                 row = _sim_pair(base_params, param, mag,
                                 schedules[i_a], schedules[i_b],
-                                seed_a, seed_b, n_restarts=n_restarts)
+                                seed_a, seed_b, space=space, n_restarts=n_restarts)
                 rows.append(row)
 
     return pd.DataFrame(rows)

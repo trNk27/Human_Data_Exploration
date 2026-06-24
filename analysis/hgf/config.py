@@ -24,7 +24,7 @@ convert between the two representations, and :func:`log_prior` evaluates the
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -95,6 +95,116 @@ THETA_BOUNDS: list[tuple[float, float]] = [
     (float(np.log(0.05)), float(np.log(30.0))),  # log_beta -> beta in [0.05, 30]
     (-10.0, 10.0),                      # bias
 ]
+
+# ---------------------------------------------------------------------------
+# Free-parameter SPACES — let the model free extra HGF parameters (omega3
+# meta-volatility, kappa volatility coupling) without rewiring the fitter.
+#
+# A ParamSpace is an ordered list of FREE parameters plus fixed values for the
+# rest. theta is the unconstrained optimisation vector (one entry per free
+# parameter); natural dicts always carry all five model parameters, so the rest
+# of the pipeline can read natural["omega3"] etc. regardless of what was fit.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """One freeable parameter: natural name, theta-space transform, prior, bounds."""
+
+    name: str            # natural-space name (omega2, omega3, kappa, beta, bias)
+    log_space: bool      # theta = log(natural)  (keeps a positive natural value)
+    prior: GaussianPrior # Gaussian prior in THETA space
+    bounds: tuple        # (lo, hi) box bounds in THETA space
+    init: float          # theta-space restart centre
+    jitter: float        # theta-space sd for random restarts
+
+    def to_theta(self, natural_value: float) -> float:
+        return float(np.log(natural_value)) if self.log_space else float(natural_value)
+
+    def to_natural(self, theta_value: float) -> float:
+        return float(np.exp(theta_value)) if self.log_space else float(theta_value)
+
+
+#: Every parameter the perceptual + response model can free, keyed by natural name.
+#: omega2/beta/bias reuse the baseline PRIORS/THETA_BOUNDS so there is one source
+#: of truth; omega3/kappa add the meta-volatility and coupling parameters.
+PARAM_SPECS: dict[str, "ParamSpec"] = {
+    "omega2": ParamSpec("omega2", False, PRIORS["omega2"],   THETA_BOUNDS[0], PRIORS["omega2"].mean,   1.5),
+    "omega3": ParamSpec("omega3", False, GaussianPrior(OMEGA3, 2.0), (-10.0, 2.0), OMEGA3,             1.5),
+    "kappa":  ParamSpec("kappa",  True,  GaussianPrior(0.0, 0.5), (float(np.log(0.1)), float(np.log(3.0))), 0.0, 0.4),
+    "beta":   ParamSpec("beta",   True,  PRIORS["log_beta"], THETA_BOUNDS[1], PRIORS["log_beta"].mean, 0.7),
+    "bias":   ParamSpec("bias",   False, PRIORS["bias"],     THETA_BOUNDS[2], PRIORS["bias"].mean,     1.0),
+}
+
+#: Natural-space defaults — fill in any parameter that is held fixed.
+NATURAL_DEFAULTS: dict[str, float] = {
+    "omega2": -3.0,
+    "omega3": OMEGA3,
+    "kappa": KAPPA,
+    "beta": float(np.exp(PRIORS["log_beta"].mean)),
+    "bias": 0.0,
+}
+
+
+@dataclass(frozen=True)
+class ParamSpace:
+    """An ordered set of FREE parameters + fixed natural values for the rest."""
+
+    free: tuple
+    fixed: dict = field(default_factory=dict)
+
+    @property
+    def specs(self) -> list:
+        return [PARAM_SPECS[n] for n in self.free]
+
+    @property
+    def k(self) -> int:
+        return len(self.free)
+
+    def to_natural(self, theta) -> dict:
+        """theta vector -> full natural dict (free from theta, rest from defaults/fixed)."""
+        nat = dict(NATURAL_DEFAULTS)
+        nat.update(self.fixed)
+        for spec, t in zip(self.specs, np.asarray(theta, dtype=float)):
+            nat[spec.name] = spec.to_natural(t)
+        return nat
+
+    def to_theta(self, natural) -> np.ndarray:
+        return np.array([s.to_theta(natural[s.name]) for s in self.specs], dtype=float)
+
+    def perceptual(self, natural) -> tuple:
+        """(omega2, omega3, kappa) for the HGF filter, from a natural dict."""
+        return (natural["omega2"], natural["omega3"], natural["kappa"])
+
+    def bounds(self) -> list:
+        return [s.bounds for s in self.specs]
+
+    def init(self) -> np.ndarray:
+        return np.array([s.init for s in self.specs], dtype=float)
+
+    def jitter(self) -> np.ndarray:
+        return np.array([s.jitter for s in self.specs], dtype=float)
+
+    def log_prior(self, theta) -> float:
+        theta = np.asarray(theta, dtype=float)
+        return float(sum(s.prior.logpdf(t) for s, t in zip(self.specs, theta)))
+
+
+#: Project default — three free parameters (omega2, beta, bias); omega3/kappa fixed.
+BASELINE: ParamSpace = ParamSpace(free=("omega2", "beta", "bias"),
+                                  fixed={"omega3": OMEGA3, "kappa": KAPPA})
+#: Extended — additionally free meta-volatility omega3 and volatility coupling kappa.
+EXTENDED: ParamSpace = ParamSpace(free=("omega2", "omega3", "kappa", "beta", "bias"))
+
+
+def make_param_space(extra_free: list[str] | None) -> ParamSpace:
+    """Build a ParamSpace freeing omega2/beta/bias plus any of {omega3, kappa}."""
+    extra_free = list(extra_free or [])
+    if not extra_free:
+        return BASELINE
+    free = ("omega2", *extra_free, "beta", "bias")
+    fixed = {p: NATURAL_DEFAULTS[p] for p in ("omega3", "kappa") if p not in extra_free}
+    return ParamSpace(free=free, fixed=fixed)
+
 
 # ---------------------------------------------------------------------------
 # Reproducibility & output

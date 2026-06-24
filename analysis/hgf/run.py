@@ -39,7 +39,9 @@ _REPO = os.path.dirname(os.path.dirname(_HERE))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from analysis.hgf.config import SEED, RESULTS_HGF, ensure_results_dir
+from analysis.hgf.config import (
+    SEED, RESULTS_HGF, ensure_results_dir, BASELINE, ParamSpace, make_param_space,
+)
 from analysis.hgf.data import load_session, list_sessions as available_sessions
 from analysis.hgf.model import SessionModel
 from analysis.hgf.fit import shared_map_fit, fit_all_separate
@@ -66,8 +68,13 @@ def parse_args():
                    help="Number of simulated session pairs per (param, shift)")
     p.add_argument("--n-restarts", type=int, default=5,
                    help="MAP optimisation restarts per fit")
+    p.add_argument("--free", nargs="*", default=None, choices=["omega3", "kappa"],
+                   help="Additionally free these fixed HGF params (omega3, kappa). "
+                        "Default: none (baseline omega2/beta/bias). When given, output "
+                        "defaults to results/hgf_extended/.")
     p.add_argument("--out", default=None,
-                   help="Output directory (default: results/hgf/)")
+                   help="Output directory (default: results/hgf/, or results/hgf_extended/ "
+                        "when --free is given)")
     return p.parse_args()
 
 
@@ -80,13 +87,22 @@ def run(sessions: list[str] | None = None,
         n_recovery: int = 24,
         n_power: int = 20,
         n_restarts: int = 5,
-        out_dir: str | None = None) -> dict:
-    """Execute the full HGF pipeline and return a results dict."""
+        out_dir: str | None = None,
+        space: ParamSpace = BASELINE) -> dict:
+    """Execute the full HGF pipeline and return a results dict.
 
-    out_dir = out_dir or ensure_results_dir()
+    ``space`` selects which parameters are free (default: the 3-parameter
+    baseline). Freeing extra parameters (e.g. omega3, kappa) routes outputs to a
+    separate directory by default so the baseline results are preserved.
+    """
+
+    if out_dir is None:
+        out_dir = (RESULTS_HGF if space is BASELINE
+                   else os.path.join(os.path.dirname(RESULTS_HGF), "hgf_extended"))
     os.makedirs(out_dir, exist_ok=True)
     plots_dir = os.path.join(out_dir, "figures")
     os.makedirs(plots_dir, exist_ok=True)
+    print(f"  Free parameters: {list(space.free)}  (k={space.k})")
 
     # ------------------------------------------------------------------
     # 1. Load data
@@ -107,11 +123,9 @@ def run(sessions: list[str] | None = None,
     # ------------------------------------------------------------------
     print("\n=== Stage 2: Shared MAP fit (complete pooling) ===")
     t0 = time.time()
-    shared = shared_map_fit(models, n_restarts=n_restarts, seed=SEED)
-    print(f"  Done in {time.time()-t0:.1f}s  |  "
-          f"ω₂={shared.natural['omega2']:.3f}  "
-          f"β={shared.natural['beta']:.3f}  "
-          f"bias={shared.natural['bias']:.3f}")
+    shared = shared_map_fit(models, space=space, n_restarts=n_restarts, seed=SEED)
+    pstr = "  ".join(f"{n}={shared.natural[n]:.3f}" for n in space.free)
+    print(f"  Done in {time.time()-t0:.1f}s  |  {pstr}")
     print(f"  loglik={shared.loglik:.1f}  BIC={shared.as_row()['bic']:.1f}  "
           f"success={shared.success}")
 
@@ -120,13 +134,13 @@ def run(sessions: list[str] | None = None,
     # ------------------------------------------------------------------
     print("\n=== Stage 3: Per-session MAP fits ===")
     t0 = time.time()
-    sep_fits = fit_all_separate(models, n_restarts=n_restarts, seed=SEED)
+    sep_fits = fit_all_separate(models, space=space, n_restarts=n_restarts, seed=SEED)
     print(f"  Done in {time.time()-t0:.1f}s")
     for f in sep_fits:
         sid = f.per_session[list(f.per_session.keys())[0]]["session_id"]
         nat = f.natural
-        print(f"  {sid}: ω₂={nat['omega2']:.3f}  β={nat['beta']:.3f}  "
-              f"bias={nat['bias']:.3f}  "
+        pstr = "  ".join(f"{n}={nat[n]:.3f}" for n in space.free)
+        print(f"  {sid}: {pstr}  "
               f"bal_acc={list(f.per_session.values())[0]['balanced_accuracy']:.3f}")
 
     # ------------------------------------------------------------------
@@ -160,7 +174,7 @@ def run(sessions: list[str] | None = None,
     t0 = time.time()
     rw = fit_rw(models, sticky=False, n_restarts=n_restarts, seed=SEED)
     rw_stick = fit_rw(models, sticky=True, n_restarts=n_restarts, seed=SEED)
-    comp_df = compare_models(shared.loglik, hgf_k=3, n_trials=n_total_trials,
+    comp_df = compare_models(shared.loglik, hgf_k=space.k, n_trials=n_total_trials,
                               rw=rw, rw_stick=rw_stick)
     print(f"  Done in {time.time()-t0:.1f}s")
     print(comp_df[["model", "k", "loglik", "bic", "delta_bic"]].to_string(index=False))
@@ -174,9 +188,9 @@ def run(sessions: list[str] | None = None,
     # ------------------------------------------------------------------
     print(f"\n=== Stage 7: Parameter recovery (n={n_recovery}) ===")
     t0 = time.time()
-    rec_df = parameter_recovery(schedules, n_sims=n_recovery,
+    rec_df = parameter_recovery(schedules, space=space, n_sims=n_recovery,
                                 seed=SEED, n_restarts=4)
-    rec_sum = recovery_summary(rec_df)
+    rec_sum = recovery_summary(rec_df, space=space)
     print(f"  Done in {time.time()-t0:.1f}s")
     print(rec_sum.to_string(index=False))
     rec_df.to_csv(os.path.join(out_dir, "parameter_recovery.csv"), index=False)
@@ -190,8 +204,11 @@ def run(sessions: list[str] | None = None,
     print(f"\n=== Stage 8: Power check (n={n_power} pairs/condition) ===")
     t0 = time.time()
     base = shared.natural.copy()
-    pow_df = power_check(schedules, base_params=base, n_sims=n_power,
-                         n_restarts=4, seed=SEED)
+    _shift_grid = {"omega2": [0.5, 1.0, 1.5, 2.0], "omega3": [0.5, 1.0, 1.5],
+                   "kappa": [0.3, 0.6, 1.0], "beta": [0.3, 0.6, 1.0]}
+    shift_sizes = {n: _shift_grid[n] for n in space.free if n in _shift_grid}
+    pow_df = power_check(schedules, base_params=base, shift_sizes=shift_sizes,
+                         n_sims=n_power, n_restarts=4, seed=SEED, space=space)
     pow_sum = power_summary(pow_df)
     print(f"  Done in {time.time()-t0:.1f}s")
     print(pow_sum.to_string(index=False))
@@ -230,7 +247,8 @@ def run(sessions: list[str] | None = None,
     print("\n=== Stage 10: Cross-session summary plots ===")
     per_session_naturals = [f.natural for f in sep_fits]
     plots.plot_parameter_drift(sessions, per_session_naturals,
-                               shared_fit=shared.natural, save_dir=plots_dir)
+                               shared_fit=shared.natural, save_dir=plots_dir,
+                               params=list(space.free))
     plt.close("all")
 
     # ------------------------------------------------------------------
@@ -281,4 +299,5 @@ if __name__ == "__main__":
         n_power=args.n_power,
         n_restarts=args.n_restarts,
         out_dir=args.out,
+        space=make_param_space(args.free),
     )

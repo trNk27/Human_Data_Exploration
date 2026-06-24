@@ -39,7 +39,7 @@ from .model import SessionModel, p_choose_gamble
 
 def session_trajectory(model: SessionModel, natural: dict) -> pd.DataFrame:
     """Return the tidy per-trial latent trajectory for one session."""
-    df = model.trajectories(natural["omega2"])
+    df = model.trajectories(natural["omega2"], natural["omega3"], natural["kappa"])
     sd = model.sd
 
     p_hat = df["x_0_expected_mean"].to_numpy()

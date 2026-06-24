@@ -41,6 +41,8 @@ from session import Session
 from utils import REPO_ROOT, RESULTS_DIR, SESSION, add_session_arg, add_save_arg
 
 
+FNTSIZE = 10
+
 # ---------------------------------------------------------------------------
 # Colours
 # ---------------------------------------------------------------------------
@@ -174,19 +176,19 @@ def draw_session(ax: plt.Axes, sess: Session) -> None:
     # ---- Strip labels (right margin) -------------------------------------
     ax.text(1.002, (SAFE_STRIP_LO + SAFE_STRIP_HI) / 2, "Safe",
             transform=ax.get_yaxis_transform(),
-            fontsize=7, color="seagreen", va="center")
+            fontsize=FNTSIZE, color="seagreen", va="center")
     ax.text(1.002, (GAMBLE_STRIP_LO + GAMBLE_STRIP_HI) / 2, "Gamble",
             transform=ax.get_yaxis_transform(),
-            fontsize=7, color="darkorange", va="center")
+            fontsize=FNTSIZE, color="darkorange", va="center")
 
     # ---- Summary annotation ----------------------------------------------
     n_valid  = valid_block.sum()
     pct_g    = 100 * gr.sum() / n_valid if n_valid else 0
     pct_g_all = 100 * (gr.sum() + gn.sum()) / n_valid if n_valid else 0
-    ax.text(0.99, GAMBLE_STRIP_LO + 0.01,
+    ax.text(0.165, GAMBLE_STRIP_LO - 0.1,
             f"Gamble {pct_g_all:.0f} %  |  n_trials={n}",
             transform=ax.get_yaxis_transform(),
-            fontsize=6.5, color="dimgray", ha="right", va="bottom")
+            fontsize=FNTSIZE-0.5, color="dimgray", ha="right", va="bottom")
 
     # ---- Axes formatting -------------------------------------------------
     ax.set_xlim(-1, n)
@@ -194,11 +196,11 @@ def draw_session(ax: plt.Axes, sess: Session) -> None:
 
     # Only show y ticks in the probability band
     ax.set_yticks([0.0, 0.1, 0.2, 0.4, 0.8, 1.0])
-    ax.set_yticklabels(["0", ".1", ".2", ".4", ".8", "1"], fontsize=7)
-    ax.set_ylabel("P(reward | Gamble)", fontsize=8, labelpad=4)
+    ax.set_yticklabels(["0", ".1", ".2", ".4", ".8", "1"], fontsize = FNTSIZE)
+    ax.set_ylabel("P(reward | Gamble)", fontsize=FNTSIZE+1, labelpad=4)
 
     ax.spines[["top", "right"]].set_visible(False)
-    ax.set_title(f"Session {sess.id}", fontsize=9, pad=4)
+    ax.set_title(f"Session {sess.id}", fontsize=FNTSIZE+2, pad=4)
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +210,11 @@ def draw_session(ax: plt.Axes, sess: Session) -> None:
 def plot_single_session(sess: Session) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 4.2))
     draw_session(ax, sess)
-    ax.set_xlabel("Trial number", fontsize=9)
-    ax.legend(loc="lower right", fontsize=7.5, framealpha=0.88,
+    ax.set_xlabel("Trial number", fontsize=FNTSIZE+2)
+    ax.legend(loc="best", fontsize=FNTSIZE-3, framealpha=0.88,
               ncol=2, handlelength=1.4, borderpad=0.5,
               bbox_to_anchor=(1.0, 0.0))
-    fig.suptitle(f"Choice behaviour — session {sess.id}", fontsize=11, y=1.01)
+    #fig.suptitle(f"Choice behaviour — session {sess.id}", fontsize=FNTSIZE+4, y=0.98)
     fig.tight_layout()
     return fig
 
@@ -247,18 +249,18 @@ def plot_all_sessions(sessions: list[str] | None = None) -> plt.Figure:
         except Exception as exc:
             ax.text(0.5, 0.5, f"No data\n({exc})",
                     transform=ax.transAxes, ha="center", va="center",
-                    fontsize=8, color="gray")
-            ax.set_title(f"Session {sid}", fontsize=9)
+                    fontsize=FNTSIZE+1, color="gray")
+            ax.set_title(f"Session {sid}", fontsize=FNTSIZE+2)
             continue
 
-        ax.set_xlabel("Trial", fontsize=8)
+        ax.set_xlabel("Trial", fontsize=FNTSIZE+1)
 
         if not legend_done:
-            ax.legend(loc="lower right", fontsize=6, framealpha=0.85,
+            ax.legend(loc="lower right", fontsize=FNTSIZE-1, framealpha=0.85,
                       ncol=2, handlelength=1.0, borderpad=0.4)
             legend_done = True
 
-    fig.suptitle("Choice behaviour — all sessions", fontsize=13, y=1.01)
+    fig.suptitle("Choice behaviour — all sessions", fontsize=FNTSIZE+6, y=1.01)
     return fig
 
 
@@ -304,7 +306,7 @@ def main() -> None:
         else:
             os.makedirs(out_dir, exist_ok=True)
             path = os.path.join(out_dir, f"{prefix}.png")
-        fig.savefig(path, dpi=150, bbox_inches="tight")
+        fig.savefig(path, dpi=300, bbox_inches="tight")
         print(f"Saved -> {path}")
 
     plt.show()

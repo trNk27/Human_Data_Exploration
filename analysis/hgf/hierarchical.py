@@ -31,7 +31,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .config import PRIORS, SEED
+from .config import PRIORS, SEED, OMEGA3, KAPPA
 from .model import SessionModel, _session_logp_jit
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ def _make_jax_logp(models: list[SessionModel]):
         for k, m in enumerate(models):
             beta_k = jnp.exp(log_betas[k])
             lp = lp + _session_logp_jit(
-                omega2s[k], beta_k, biases[k],
+                omega2s[k], OMEGA3, KAPPA, beta_k, biases[k],
                 m._hgf, m._u, m._observed, m._y
             )
 
@@ -140,7 +140,7 @@ def _nuts_sample_jax(models: list[SessionModel],
         for k, m in enumerate(models):
             beta_k = jnp.exp(log_betas[k])
             ll_k = _session_logp_jit(
-                omega2s[k], beta_k, biases[k],
+                omega2s[k], OMEGA3, KAPPA, beta_k, biases[k],
                 m._hgf, m._u, m._observed, m._y
             )
             numpyro.factor(f"ll_{k}", ll_k)

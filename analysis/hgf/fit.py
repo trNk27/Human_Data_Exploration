@@ -23,7 +23,9 @@ import jax
 import jax.numpy as jnp
 from scipy.optimize import minimize
 
-from .config import PRIORS, THETA_INIT, THETA_BOUNDS, to_natural, SEED
+from .config import (
+    PARAM_SPECS, NATURAL_DEFAULTS, BASELINE, ParamSpace, SEED,
+)
 from .model import SessionModel, _session_logp_jit, p_choose_gamble
 
 
@@ -35,28 +37,33 @@ def _gauss_logpdf(x, mean, sd):
     return -0.5 * jnp.log(2 * jnp.pi * sd ** 2) - 0.5 * ((x - mean) / sd) ** 2
 
 
-def _log_prior_jax(theta):
-    return (
-        _gauss_logpdf(theta[0], PRIORS["omega2"].mean, PRIORS["omega2"].sd)
-        + _gauss_logpdf(theta[1], PRIORS["log_beta"].mean, PRIORS["log_beta"].sd)
-        + _gauss_logpdf(theta[2], PRIORS["bias"].mean, PRIORS["bias"].sd)
-    )
+def _make_neg_log_post(models: list[SessionModel], space: ParamSpace = BASELINE,
+                       use_prior: bool = True):
+    """Return a jitted value-and-grad of the negative log-posterior over theta.
 
-
-def _make_neg_log_post(models: list[SessionModel], use_prior: bool = True):
-    """Return a jitted value-and-grad of the negative log-posterior over theta."""
+    ``theta`` has one entry per free parameter of ``space`` (in ``space.free``
+    order). Perceptual parameters held fixed by ``space`` enter the likelihood as
+    constants, so the same single likelihood serves the baseline and extended
+    models.
+    """
+    free = space.free
+    log_space = {n: PARAM_SPECS[n].log_space for n in free}
+    fixed = {**NATURAL_DEFAULTS, **space.fixed}     # python floats for held params
+    prior_mean = jnp.array([PARAM_SPECS[n].prior.mean for n in free])
+    prior_sd = jnp.array([PARAM_SPECS[n].prior.sd for n in free])
 
     def neg_log_post(theta):
-        omega2 = theta[0]
-        beta = jnp.exp(theta[1])
-        bias = theta[2]
+        nat = dict(fixed)
+        for i, n in enumerate(free):
+            nat[n] = jnp.exp(theta[i]) if log_space[n] else theta[i]
         ll = 0.0
         for m in models:
             ll = ll + _session_logp_jit(
-                omega2, beta, bias, m._hgf, m._u, m._observed, m._y
+                nat["omega2"], nat["omega3"], nat["kappa"], nat["beta"], nat["bias"],
+                m._hgf, m._u, m._observed, m._y,
             )
         if use_prior:
-            ll = ll + _log_prior_jax(theta)
+            ll = ll + jnp.sum(_gauss_logpdf(theta, prior_mean, prior_sd))
         return -ll
 
     return jax.jit(jax.value_and_grad(neg_log_post))
@@ -71,12 +78,13 @@ class FitResult:
     """Outcome of a MAP fit (shared or per-session)."""
 
     label: str
-    theta: np.ndarray                       # unconstrained [omega2, log_beta, bias]
-    natural: dict                           # {omega2, beta, bias}
+    theta: np.ndarray                       # unconstrained, one entry per free param
+    natural: dict                           # full {omega2, omega3, kappa, beta, bias}
     neg_log_post: float                     # at the optimum
     loglik: float                           # choice log-likelihood (no prior)
     n_trials: int
     n_sessions: int
+    k: int = 3                              # number of FREE parameters (for BIC)
     per_session: dict = field(default_factory=dict)  # session_id -> metrics
     success: bool = True
 
@@ -84,13 +92,16 @@ class FitResult:
         row = {
             "fit": self.label,
             "omega2": self.natural["omega2"],
+            "omega3": self.natural["omega3"],
+            "kappa": self.natural["kappa"],
             "beta": self.natural["beta"],
             "bias": self.natural["bias"],
+            "k": self.k,
             "loglik": self.loglik,
             "neg_log_post": self.neg_log_post,
             "n_trials": self.n_trials,
             "n_sessions": self.n_sessions,
-            "bic": bic(self.loglik, k=3, n=self.n_trials),
+            "bic": bic(self.loglik, k=self.k, n=self.n_trials),
             "success": self.success,
         }
         return row
@@ -108,7 +119,7 @@ def bic(loglik: float, k: int, n: int) -> float:
 _BARRIER = 1e8   # finite penalty returned in place of NaN/inf, so line searches back off
 
 
-def _optimise(neg_log_post_vg, inits: list[np.ndarray]):
+def _optimise(neg_log_post_vg, inits: list[np.ndarray], bounds: list):
     """Robust bounded minimisation of the negative log-posterior.
 
     Primary search is gradient-free, bounded Nelder-Mead from several restarts —
@@ -135,14 +146,14 @@ def _optimise(neg_log_post_vg, inits: list[np.ndarray]):
     best = None
     for x0 in inits:
         res = minimize(val, np.asarray(x0, float), method="Nelder-Mead",
-                       bounds=THETA_BOUNDS,
+                       bounds=bounds,
                        options={"maxiter": 3000, "xatol": 1e-6, "fatol": 1e-9})
         if best is None or res.fun < best.fun:
             best = res
 
     converged = bool(best.success)
     polish = minimize(val_grad, np.asarray(best.x, float), jac=True, method="L-BFGS-B",
-                      bounds=THETA_BOUNDS,
+                      bounds=bounds,
                       options={"maxiter": 200, "ftol": 1e-12, "gtol": 1e-9})
     if np.isfinite(polish.fun) and polish.fun <= best.fun:
         polish.success = converged or bool(polish.success)
@@ -151,20 +162,21 @@ def _optimise(neg_log_post_vg, inits: list[np.ndarray]):
     return best
 
 
-def _restart_inits(n: int = 5, seed: int = SEED) -> list[np.ndarray]:
+def _restart_inits(space: ParamSpace, n: int = 5, seed: int = SEED) -> list[np.ndarray]:
     rng = np.random.default_rng(seed)
-    inits = [THETA_INIT.copy()]
-    lo = np.array([b[0] for b in THETA_BOUNDS])
-    hi = np.array([b[1] for b in THETA_BOUNDS])
+    init = space.init()
+    inits = [init.copy()]
+    lo = np.array([b[0] for b in space.bounds()])
+    hi = np.array([b[1] for b in space.bounds()])
+    jit = space.jitter()
     for _ in range(n - 1):
-        cand = THETA_INIT + rng.normal(0, [1.5, 0.7, 1.0])
-        inits.append(np.clip(cand, lo, hi))
+        inits.append(np.clip(init + rng.normal(0, jit), lo, hi))
     return inits
 
 
 def _choice_metrics(model: SessionModel, natural: dict) -> dict:
     """Per-session predictive metrics at the fitted parameters."""
-    df = model.trajectories(natural["omega2"])
+    df = model.trajectories(natural["omega2"], natural["omega3"], natural["kappa"])
     p_hat = df["x_0_expected_mean"].to_numpy()
     p_g = np.asarray(p_choose_gamble(jnp.asarray(p_hat), natural["beta"], natural["bias"]))
     y = model.sd.y
@@ -174,7 +186,8 @@ def _choice_metrics(model: SessionModel, natural: dict) -> dict:
     tpr = float(np.mean(pred[y == 1] == 1)) if np.any(y == 1) else np.nan
     tnr = float(np.mean(pred[y == 0] == 0)) if np.any(y == 0) else np.nan
     bal_acc = float(np.nanmean([tpr, tnr]))
-    ll = float(model.logp(natural["omega2"], natural["beta"], natural["bias"]))
+    ll = float(model.logp(natural["omega2"], natural["omega3"], natural["kappa"],
+                          natural["beta"], natural["bias"]))
     # likelihood per trial and chance log-likelihood (base rate)
     base = np.clip(np.mean(y), 1e-6, 1 - 1e-6)
     ll_chance = float(np.sum(y * np.log(base) + (1 - y) * np.log(1 - base)))
@@ -191,15 +204,16 @@ def _choice_metrics(model: SessionModel, natural: dict) -> dict:
 
 
 def shared_map_fit(
-    models: list[SessionModel], n_restarts: int = 5, seed: int = SEED
+    models: list[SessionModel], space: ParamSpace = BASELINE,
+    n_restarts: int = 5, seed: int = SEED,
 ) -> FitResult:
-    """Complete-pooling MAP fit: one (omega2, beta, bias) across all sessions."""
-    vg = _make_neg_log_post(models, use_prior=True)
-    res = _optimise(vg, _restart_inits(n_restarts, seed))
+    """Complete-pooling MAP fit: one parameter set (per ``space``) across all sessions."""
+    vg = _make_neg_log_post(models, space, use_prior=True)
+    res = _optimise(vg, _restart_inits(space, n_restarts, seed), space.bounds())
     theta = np.asarray(res.x, float)
-    natural = to_natural(theta)
+    natural = space.to_natural(theta)
 
-    vg_noprior = _make_neg_log_post(models, use_prior=False)
+    vg_noprior = _make_neg_log_post(models, space, use_prior=False)
     loglik = float(-vg_noprior(jnp.asarray(theta))[0])
     n_trials = int(sum(m.sd.n_trials for m in models))
 
@@ -212,21 +226,24 @@ def shared_map_fit(
         loglik=loglik,
         n_trials=n_trials,
         n_sessions=len(models),
+        k=space.k,
         per_session=per_session,
         success=bool(res.success),
     )
 
 
 def separate_map_fit(
-    model: SessionModel, n_restarts: int = 5, seed: int = SEED
+    model: SessionModel, space: ParamSpace = BASELINE,
+    n_restarts: int = 5, seed: int = SEED,
 ) -> FitResult:
     """No-pooling MAP fit for a single session."""
-    vg = _make_neg_log_post([model], use_prior=True)
-    res = _optimise(vg, _restart_inits(n_restarts, seed))
+    vg = _make_neg_log_post([model], space, use_prior=True)
+    res = _optimise(vg, _restart_inits(space, n_restarts, seed), space.bounds())
     theta = np.asarray(res.x, float)
-    natural = to_natural(theta)
+    natural = space.to_natural(theta)
 
-    loglik = float(model.logp(natural["omega2"], natural["beta"], natural["bias"]))
+    loglik = float(model.logp(natural["omega2"], natural["omega3"], natural["kappa"],
+                             natural["beta"], natural["bias"]))
     return FitResult(
         label=f"separate:{model.session_id}",
         theta=theta,
@@ -235,12 +252,14 @@ def separate_map_fit(
         loglik=loglik,
         n_trials=model.sd.n_trials,
         n_sessions=1,
+        k=space.k,
         per_session={model.session_id: _choice_metrics(model, natural)},
         success=bool(res.success),
     )
 
 
 def fit_all_separate(
-    models: list[SessionModel], n_restarts: int = 5, seed: int = SEED
+    models: list[SessionModel], space: ParamSpace = BASELINE,
+    n_restarts: int = 5, seed: int = SEED,
 ) -> list[FitResult]:
-    return [separate_map_fit(m, n_restarts=n_restarts, seed=seed) for m in models]
+    return [separate_map_fit(m, space=space, n_restarts=n_restarts, seed=seed) for m in models]

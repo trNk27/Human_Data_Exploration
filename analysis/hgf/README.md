@@ -45,6 +45,32 @@ the predicted level-2 mean (= perceived gamble win-probability).
 | β | log-space; `log_beta ~ N(log 2, 1)` ↔ β ∈ (0.05, 30) | |
 | bias | unconstrained | N(0, 2) |
 
+By default κ = 1 and ω₃ = −4 are **fixed**. They can be **freed** as extra
+perceptual parameters (see *Extended model* below).
+
+### Extended model — freeing ω₃ and κ
+
+The parameter set is configurable via a `ParamSpace` (`config.py`). The
+`--free` CLI flag adds any of the otherwise-fixed perceptual parameters:
+
+| Symbol | Meaning | Space | Prior |
+|---|---|---|---|
+| ω₃ | level-3 tonic (meta-)volatility | unconstrained | N(−4, 2) |
+| κ | volatility coupling, levels 2↔3 | log-space; `log κ ~ N(0, 0.5)` ↔ κ ∈ (0.1, 3) | |
+
+```bash
+python -m analysis.hgf.run --free omega3 kappa --no-hierarchical   # 5-param fit
+```
+
+This writes to **`results/hgf_extended/`** by default (the baseline
+`results/hgf/` is left untouched), so the two models can be compared by BIC and
+by their recovery/power summaries. A single likelihood injects all three
+perceptual parameters into the HGF (ω₂→`attributes[1]`, ω₃→`attributes[2]`,
+κ→the levels-2↔3 volatility-coupling strength); for the baseline fit ω₃/κ enter
+as fixed constants. **Caveat:** ω₃ and κ are weakly identified in an N=1 design
+(ω₂ is already underpowered) — check `parameter_recovery_summary.csv` and the
+ΔBIC before trusting them.
+
 ### Belief continuity
 Beliefs are **reset** to the prior at each session boundary. Sessions are
 weeks apart with re-randomised schedules, so continuity across sessions is
@@ -56,7 +82,7 @@ not warranted.
 
 | Module | Contents |
 |---|---|
-| `config.py` | Constants, priors, bounds, `to_natural`, `log_prior` |
+| `config.py` | Constants, priors, bounds; `ParamSpace`/`PARAM_SPECS`, `BASELINE`/`EXTENDED`/`make_param_space` |
 | `data.py` | `SessionData`, `load_session`, `list_sessions` |
 | `model.py` | `build_hgf`, `SessionModel`, `simulate_session`, response fn |
 | `fit.py` | `shared_map_fit`, `separate_map_fit`, `FitResult`, `bic` |
@@ -84,6 +110,9 @@ python -m analysis.hgf.run --sessions 20250714 20250721 --out results/hgf_subset
 
 # Reduce stochastic validation draws for a quick check
 python -m analysis.hgf.run --no-hierarchical --n-recovery 8 --n-power 6
+
+# Extended model: additionally free omega3 and kappa -> results/hgf_extended/
+python -m analysis.hgf.run --free omega3 kappa --no-hierarchical
 ```
 
 ---

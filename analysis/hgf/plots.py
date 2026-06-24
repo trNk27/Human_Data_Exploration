@@ -149,7 +149,8 @@ def plot_volatility(traj: pd.DataFrame,
 def plot_parameter_drift(session_ids: list[str],
                          per_session_fits: list[dict],
                          shared_fit: Optional[dict] = None,
-                         save_dir: Optional[str] = None) -> tuple:
+                         save_dir: Optional[str] = None,
+                         params: Optional[list[str]] = None) -> tuple:
     """Per-session MAP estimates plotted over session index.
 
     Each panel shows one free parameter; a horizontal dashed line shows the
@@ -157,17 +158,23 @@ def plot_parameter_drift(session_ids: list[str],
 
     Parameters
     ----------
-    per_session_fits : list of dicts with keys omega2, beta, bias
-        One dict per session, in order.
-    shared_fit : optional dict with keys omega2, beta, bias
-        The shared (pooled) MAP estimate, drawn as a horizontal dashed line.
+    per_session_fits : list of dicts (full natural params), one per session.
+    shared_fit : optional dict — the shared (pooled) MAP estimate.
+    params : which parameters to draw (default omega2, beta, bias). Pass the
+        fitted free set to include omega3/kappa for the extended model.
     """
-    params = ["omega2", "beta", "bias"]
-    labels = ["ω₂ (tonic volatility)", "β (inverse temperature)", "bias (gamble preference)"]
-    colors = ["#1565C0", "#AD1457", "#2E7D32"]
+    if params is None:
+        params = ["omega2", "beta", "bias"]
+    _drift_lab = {"omega2": "ω₂ (tonic volatility)", "omega3": "ω₃ (meta-volatility)",
+                  "kappa": "κ (volatility coupling)", "beta": "β (inverse temperature)",
+                  "bias": "bias (gamble preference)"}
+    labels = [_drift_lab.get(p, p) for p in params]
+    colors = [_PARAM_PALETTE.get(p, "#333333") for p in params]
 
     x = np.arange(len(session_ids))
-    fig, axes = plt.subplots(3, 1, figsize=(9, 9), sharex=True)
+    fig, axes = plt.subplots(len(params), 1, figsize=(9, 3 * len(params)), sharex=True)
+    if len(params) == 1:
+        axes = [axes]
 
     for ax, p, lab, col in zip(axes, params, labels, colors):
         vals = [f.get(p, np.nan) for f in per_session_fits]
@@ -223,14 +230,26 @@ def plot_model_comparison(comp_df: pd.DataFrame,
     return fig, axes
 
 
+#: Display labels / palette for every freeable parameter.
+_PARAM_LABELS = {"omega2": "ω₂", "omega3": "ω₃", "kappa": "κ", "beta": "β", "bias": "bias"}
+_PARAM_PALETTE = {"omega2": "#1565C0", "omega3": "#6A1B9A", "kappa": "#00838F",
+                  "beta": "#AD1457", "bias": "#2E7D32"}
+
+
 def plot_recovery(rec_df: pd.DataFrame,
                   save_dir: Optional[str] = None) -> tuple:
-    """Scatter true vs recovered for each free parameter (3-panel grid)."""
-    params = ["omega2", "beta", "bias"]
-    labels = ["ω₂", "β", "bias"]
-    colors = ["#1565C0", "#AD1457", "#2E7D32"]
+    """Scatter true vs recovered for each free parameter (one panel per param).
 
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    Parameters are inferred from the ``true_*``/``rec_*`` columns present, so the
+    figure adapts to the baseline (3) or extended (5) parameter set.
+    """
+    params = [c[len("true_"):] for c in rec_df.columns if c.startswith("true_")]
+    labels = [_PARAM_LABELS.get(p, p) for p in params]
+    colors = [_PARAM_PALETTE.get(p, "#333333") for p in params]
+
+    fig, axes = plt.subplots(1, len(params), figsize=(4.3 * len(params), 4))
+    if len(params) == 1:
+        axes = [axes]
 
     for ax, p, lab, col in zip(axes, params, labels, colors):
         t = rec_df[f"true_{p}"].to_numpy()
