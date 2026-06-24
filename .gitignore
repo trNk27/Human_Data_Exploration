@@ -2,9 +2,11 @@
 *.mat
 # CSV files - static, not tracked in git
 *.csv
-# result plots - too many, not tracked
-*.png
 # papers - just for claude to learn
 *.pdf
 # python bytecode cache
 __pycache__/
+# batch ACG exports - ~250 generated PNGs per session, too many to track
+acg_export/
+# Office temp lock files (e.g. ~$Prototype.pptx)
+~$*
