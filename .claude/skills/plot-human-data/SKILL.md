@@ -4,7 +4,8 @@ description: >-
   Generate any figure the Human Data neural codebase can produce — PSTHs,
   rasters, autocorrelograms, ZETA responsiveness/outcome detections, cumulative
   spike-count + ZETA plots, firing-rate-vs-regressor scatters (behavioural
-  P(reward), HGF belief p̂, prediction error δ₁), population heatmaps, and
+  P(reward), HGF belief p̂, HGF prediction error δ₁, RW prediction error δ),
+  population heatmaps, and
   behaviour / Rescorla-Wagner / HGF model plots — from a plain-English request.
   Use whenever the user asks to plot, visualise, draw, or "make a PNG/figure"
   for a neuron, session, brain region, event, outcome, or analysis in this repo.
@@ -60,6 +61,7 @@ $env:MPLBACKEND="Agg"; & "C:\Users\mstammler\.conda\envs\humandata\python.exe" -
 | "Does the response **differ by outcome** (reward vs no-reward, gamble vs safe)?" | `python analysis/zeta_outcome.py --contrast reward --csv --save` | `results/zeta_outcome/` |
 | Firing rate **vs perceived P(reward)** (behavioural) | `.fr_vs_p()` or `python -m viewers.firing_rate_vs_perc_p --save` | `results/figures/<session>/` / `results/` |
 | Firing rate **vs HGF belief p̂** / **prediction error δ₁** | `.fr_vs_hgf_p()` / `.fr_vs_delta1()` or the matching viewer | needs HGF CSV first (below) |
+| Firing rate **vs RW prediction error δ** (recommended PE: RW+stickiness, best BIC) | `.fr_vs_rw_pe()` or `python -m viewers.firing_rate_vs_rw_pe --save` | needs RW CSV first (below) |
 | **Population heatmap** (neurons × time, z-scored) | `python -m analysis.population_heatmap --save` | `results/` |
 | Is responsiveness **region-dependent**? | `python -m analysis.responsive_region --plot` (run ZETA first) | `results/zeta_responsiveness/` |
 | Raw **choice behaviour** over the reward schedule | `python -m analysis.behaviour_overview --save` | `results/figures/…` |
@@ -101,7 +103,7 @@ from explore import grid
 grid(sess, "psth", area="ACC", align="reward", condition="all").save("acc_psth.png")
 ```
 
-`NeuronView` methods: `.psth() .raster() .acg() .fr_vs_p() .fr_vs_hgf_p() .fr_vs_delta1()`
+`NeuronView` methods: `.psth() .raster() .acg() .fr_vs_p() .fr_vs_hgf_p() .fr_vs_delta1() .fr_vs_rw_pe()`
 — full signatures in COMMANDS.md §2. `grid(sess, kind, neurons=…, area=…, **kw)`
 tiles any of those across neurons.
 
@@ -136,12 +138,16 @@ excitatory). Pick a different one from the ZETA CSV (above). Use this script as 
 template for any "PSTH + the ZETA internals" figure for another event by swapping the
 event passed to `zetatest`/`responding_event_times`.
 
-## HGF-dependent plots need a trajectory CSV
+## Model-PE plots need a trajectory CSV
 
 `fr_vs_hgf_p` and `fr_vs_delta1` read `results/hgf/trajectory_<session>.csv`. If it's
 missing, the plot shows a "no HGF trajectory" placeholder — build it first:
 `python -m analysis.hgf.run --sessions <id> --no-hierarchical` (COMMANDS.md §6).
 **Env pins matter:** `numpyro`-latest breaks `pyhgf` (see the HGF env memory note).
+
+`fr_vs_rw_pe` reads `results/rw/trajectory_<session>.csv` (RW+stickiness prediction
+error δ = outcome − Q — the best-fitting choice model by BIC). If missing, build it
+with `python -m analysis.rw_trajectories` (fast; no pyhgf/NUTS needed).
 
 ## After you produce a figure
 

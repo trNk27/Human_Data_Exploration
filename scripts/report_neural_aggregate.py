@@ -201,6 +201,67 @@ def fig_outcome(oreg):
     return p
 
 
+def fig_reward_selectivity_pref(df):
+    """Stacked bar: % reward-selective neurons per region, split by preference direction."""
+    if "pref_rew_outcome" not in df.columns:
+        print("  [skip] pref_rew_outcome column not found")
+        return None
+
+    regions_present = [r for r in REGIONS if r in df["region"].values]
+    pct_rew, pct_nrew, n_tots = [], [], []
+    for r in regions_present:
+        sub = df[df["region"] == r]
+        sig = sub[sub["sig_fdr_rew_outcome"]]
+        n = len(sub)
+        n_tots.append(n)
+        pct_rew.append(100 * (sig["pref_rew_outcome"] == "G+R").sum() / n)
+        pct_nrew.append(100 * (sig["pref_rew_outcome"] == "G+N").sum() / n)
+
+    x = np.arange(len(regions_present))
+    w = 0.55
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.bar(x, pct_rew, w, label="Reward-preferring (G+R)", color="firebrick", alpha=0.85)
+    ax.bar(x, pct_nrew, w, bottom=pct_rew, label="No-reward-preferring (G+N)",
+           color="steelblue", alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels(regions_present)
+    ax.set_ylabel("% of all neurons (FDR q<.05)")
+    ax.set_title("Reward selectivity by region & preference\n(G+R vs G+N, reward-aligned)")
+    ax.legend(fontsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    for i, (r, n) in enumerate(zip(pct_rew, n_tots)):
+        total_bar = r + pct_nrew[i]
+        ax.text(x[i], total_bar + 0.4, f"n={n}", ha="center", va="bottom", fontsize=8)
+    fig.tight_layout()
+    p = os.path.join(OUT, "fig_reward_selectivity_pref_by_region.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
+def fig_reward_selectivity(oreg):
+    regions_present = [r for r in REGIONS if r in oreg.region.values]
+    vals = [oreg.loc[oreg.region == r, "pct_rew_outcome_fdr"].values[0]
+            for r in regions_present]
+    ns = [oreg.loc[oreg.region == r, "n_neurons"].values[0]
+          for r in regions_present]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    x = np.arange(len(regions_present))
+    bars = ax.bar(x, vals, 0.55, color="firebrick", alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels(regions_present)
+    ax.set_ylabel("% neurons reward-selective (FDR q<.05)")
+    ax.set_title("Reward outcome selectivity by region\n(G+R vs G+N, reward-aligned)")
+    ax.spines[["top", "right"]].set_visible(False)
+    for bar, n in zip(bars, ns):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.4,
+                f"n={n}", ha="center", va="bottom", fontsize=8)
+    fig.tight_layout()
+    p = os.path.join(OUT, "fig_reward_selectivity_by_region.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight"); plt.close(fig)
+    return p
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     df = load_all()
@@ -235,7 +296,10 @@ def main():
 
     p1 = fig_responsiveness(rtab)
     p2 = fig_outcome(oreg)
-    print(f"\nSaved figures -> {p1}\n              -> {p2}")
+    p3 = fig_reward_selectivity(oreg)
+    p4 = fig_reward_selectivity_pref(df)
+    paths = [p for p in [p1, p2, p3, p4] if p]
+    print("\nSaved figures -> " + "\n              -> ".join(paths))
 
 
 if __name__ == "__main__":

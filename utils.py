@@ -156,6 +156,20 @@ def load_hgf_perceived_prob(session_id, n_trials, results_dir=None):
     )
 
 
+def load_rw_trajectory_column(session_id, n_trials, column):
+    """One Rescorla-Wagner (+stickiness) trajectory column, scattered onto a
+    length-``n_trials`` array.
+
+    Reads ``results/rw/trajectory_<session_id>.csv`` (written by
+    ``analysis.rw_trajectories``) and places ``column`` back onto a per-trial
+    array using ``original_trial_index``. Returns ``None`` when the session has no
+    RW trajectory CSV. Shares the scatter logic of :func:`load_hgf_trajectory_column`.
+    """
+    return load_hgf_trajectory_column(
+        session_id, n_trials, column, results_dir=os.path.join(RESULTS_DIR, "rw")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Spike-train and event helpers
 # ---------------------------------------------------------------------------
@@ -297,5 +311,5 @@ def maybe_save(fig, args, prefix="plot", subdir=None):
             path = os.path.join(subdir, name)
         else:
             path = name
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+    fig.savefig(path, dpi=600, bbox_inches="tight")
     print(f"Saved -> {path}")

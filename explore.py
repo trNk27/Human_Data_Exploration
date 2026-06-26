@@ -41,7 +41,7 @@ from scipy.ndimage import gaussian_filter1d
 
 from utils import (
     EVENTS, EVENT_STYLE, CONDITIONS, select_neurons, RESULTS_DIR,
-    load_hgf_perceived_prob, load_hgf_trajectory_column,
+    load_hgf_perceived_prob, load_hgf_trajectory_column, load_rw_trajectory_column,
 )
 from compute import (
     compute_psth, compute_aligned_raster, compute_acg,
@@ -233,9 +233,9 @@ def _draw_fr_vs_regressor(ax, x, y, label, xlabel, *, xlim=(0.0, 1.0),
     ax.spines[["top", "right"]].set_visible(False)
 
 
-def _hgf_missing(ax, label, xlabel):
-    """Placeholder when a session has no HGF trajectory CSV yet."""
-    ax.text(0.5, 0.5, "no HGF trajectory\n(run analysis.hgf.run)",
+def _hgf_missing(ax, label, xlabel, hint="no HGF trajectory\n(run analysis.hgf.run)"):
+    """Placeholder when a session has no model-trajectory CSV yet."""
+    ax.text(0.5, 0.5, hint,
             transform=ax.transAxes, ha="center", va="center",
             fontsize=7, color="gray")
     ax.set_title(label, fontsize=6.5)
@@ -314,6 +314,39 @@ def draw_fr_vs_delta1(ax, sess, train, label, window="trial", n_bins=8,
                           xlim=(-1.0, 1.0), n_bins=n_bins, conditions=conds)
 
 
+def draw_fr_vs_rw_pe(ax, sess, train, label, window="trial", n_bins=8,
+                     by_condition=True):
+    """Firing rate vs the Rescorla-Wagner reward prediction error δ = outcome − Q
+    (gamble trials).
+
+    Mirror of :func:`draw_fr_vs_delta1`, but the x-axis is the RW + stickiness
+    prediction error — the best-fitting choice model for this dataset (lowest BIC;
+    see ``results/hgf/model_comparison.csv``) — read from
+    ``results/rw/trajectory_<session>.csv``. δ is a genuine reward prediction error
+    only when a gamble outcome is observed, so safe trials (where it collapses to
+    −Q) are excluded. By default (`by_condition=True`) points are coloured by
+    outcome (G+R = positive PE, G+N = negative PE) with a regression line per
+    condition; set `by_condition=False` for a single pooled fit.
+    """
+    if window not in WINDOWS:
+        raise ValueError(f"window must be one of {WINDOWS}")
+
+    rw_pe = load_rw_trajectory_column(sess.id, len(sess.trials), "rw_pe")
+    if rw_pe is None:
+        _hgf_missing(ax, label, "Prediction error δ (RW)",
+                     hint="no RW trajectory\n(run analysis.rw_trajectories)")
+        return
+
+    gamble_mask = sess.responding_mask & (sess.trials["ChosenArm_G1S0"].to_numpy() == 1)
+    rw_pe = np.where(gamble_mask, rw_pe, np.nan)   # PE defined only on observed (gamble) trials
+    rates = trial_firing_rates([train], sess.trials, sess.sampling_rate,
+                               window=window, trial_mask=gamble_mask)
+    conds = _trial_conditions(sess) if by_condition else None
+    _draw_fr_vs_regressor(ax, rw_pe, rates[:, 0], label,
+                          "Prediction error  δ = reward − Q (RW)",
+                          xlim=(-1.0, 1.0), n_bins=n_bins, conditions=conds)
+
+
 # Dispatch tables — the single source of truth for "what kinds exist".
 _DRAW = {
     "psth":        draw_psth,
@@ -322,6 +355,7 @@ _DRAW = {
     "fr_vs_p":     draw_fr_vs_p,
     "fr_vs_hgf_p": draw_fr_vs_hgf_p,
     "fr_vs_delta1": draw_fr_vs_delta1,
+    "fr_vs_rw_pe": draw_fr_vs_rw_pe,
 }
 _GRID_FIGSIZE = {
     "psth":        (4.0, 3.0),
@@ -330,6 +364,7 @@ _GRID_FIGSIZE = {
     "fr_vs_p":     (4.5, 3.5),
     "fr_vs_hgf_p": (4.5, 3.5),
     "fr_vs_delta1": (4.5, 3.5),
+    "fr_vs_rw_pe": (4.5, 3.5),
 }
 _PANEL_FIGSIZE = {
     "psth":        (7.0, 3.0),
@@ -338,6 +373,7 @@ _PANEL_FIGSIZE = {
     "fr_vs_p":     (6.5, 4.0),
     "fr_vs_hgf_p": (6.5, 4.0),
     "fr_vs_delta1": (6.5, 4.0),
+    "fr_vs_rw_pe": (6.5, 4.0),
 }
 # Plots whose legend is identical on every axis -> draw it once in a grid.
 _LEGEND_SHARED = {"psth", "raster"}
@@ -348,6 +384,7 @@ _KIND_TITLE = {
     "fr_vs_p":     "FR vs perceived P(reward)",
     "fr_vs_hgf_p": "FR vs HGF perceived P(reward)",
     "fr_vs_delta1": "FR vs prediction error (δ₁)",
+    "fr_vs_rw_pe": "FR vs prediction error (RW δ)",
 }
 
 
@@ -465,6 +502,13 @@ class NeuronView:
             "fr_vs_delta1",
             dict(window=window, n_bins=n_bins, by_condition=by_condition),
             ["fr_vs_delta1", f"n{self.idx}", window],
+        )
+
+    def fr_vs_rw_pe(self, window="trial", n_bins=8, by_condition=True) -> Panel:
+        return self._panel(
+            "fr_vs_rw_pe",
+            dict(window=window, n_bins=n_bins, by_condition=by_condition),
+            ["fr_vs_rw_pe", f"n{self.idx}", window],
         )
 
     def __repr__(self) -> str:

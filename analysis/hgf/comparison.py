@@ -151,6 +151,68 @@ def fit_rw(models: list[SessionModel], sticky: bool = False,
 
 
 # ---------------------------------------------------------------------------
+# Per-trial trajectory (the RW analogue of analysis.hgf.trajectories)
+# ---------------------------------------------------------------------------
+
+def rw_session_trajectory(model: SessionModel, natural: dict) -> pd.DataFrame:
+    """Per-trial RW(+stickiness) latent trajectory for one session.
+
+    Replays the same forward pass as :func:`_rw_session_loglik` (in numpy),
+    recording the PRE-update gamble value ``Q`` and the level-1 reward prediction
+    error ``δ = outcome − Q`` for every trial. ``δ`` is a genuine reward
+    prediction error only when the gamble outcome is observed; on safe trials it
+    collapses to ``−Q`` (downstream viewers mask it out), exactly as the HGF
+    δ₁ does. The schema parallels :func:`analysis.hgf.trajectories.session_trajectory`
+    so the trajectory loader (``utils.load_hgf_trajectory_column``) works unchanged.
+
+    ``natural`` is the fitted RW parameter dict ``{alpha, beta, bias, phi}`` (use
+    the shared / complete-pooling fit, mirroring how the HGF trajectory uses the
+    shared parameters).
+    """
+    sd = model.sd
+    alpha = float(natural["alpha"])
+    beta = float(natural["beta"])
+    bias = float(natural["bias"])
+    phi = float(natural.get("phi", 0.0))
+
+    u = np.asarray(sd.u, dtype=float)
+    observed = np.asarray(sd.observed, dtype=float)
+    y = np.asarray(sd.y, dtype=float)
+    n = int(sd.n_trials)
+
+    value = np.empty(n)   # pre-update Q (gamble win-prob estimate — RW analogue of p̂)
+    pe = np.empty(n)      # δ = outcome − Q
+    p_g = np.empty(n)
+
+    q = 0.5
+    last_c = 0.0
+    for t in range(n):
+        value[t] = q
+        ev_gamble = q * REWARD_GAMBLE
+        logit = beta * (ev_gamble - REWARD_SAFE) + bias + phi * last_c
+        p_g[t] = 1.0 / (1.0 + np.exp(-logit))
+        pe[t] = u[t] - q
+        # update the gamble win-prob estimate only when the gamble was sampled
+        q = q + observed[t] * alpha * (u[t] - q)
+        last_c = 1.0 if y[t] == 1 else -1.0
+
+    gamble_outcome = np.where(observed == 1, u, np.nan)
+
+    return pd.DataFrame({
+        "session_id": sd.session_id,
+        "trial": np.arange(n),
+        "value_gamble": value,
+        "rw_pe": pe,
+        "p_choose_gamble": p_g,
+        "actual_choice": y,
+        "gamble_observed": observed.astype(int),
+        "gamble_outcome": gamble_outcome,
+        "true_p_schedule": sd.p_schedule,
+        "original_trial_index": sd.trial_index,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Comparison table
 # ---------------------------------------------------------------------------
 

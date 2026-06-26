@@ -50,6 +50,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from session import Session
 from utils import CONDITIONS, add_session_arg, add_save_arg, maybe_save
 
+# ---------------------------------------------------------------------------
+# Global font size — change this one number to scale all text in the figure.
+# Each fontsize below is BASE_FONT + a fixed offset that preserves the original
+# visual hierarchy (original sizes: 6, 6.5, 7, 7.5, 8, 9, 10, 11).
+# ---------------------------------------------------------------------------
+BASE_FONT = 10
+
 
 # ---------------------------------------------------------------------------
 # Colour helper
@@ -297,10 +304,10 @@ def plot_choice_timeline(
             )
         ax.set_ylim(0, 1)
         ax.set_yticks([])
-        ax.set_ylabel(ylabel, fontsize=9, labelpad=6,
+        ax.set_ylabel(ylabel, fontsize=BASE_FONT + 3, labelpad=6,
                       rotation=0, ha="right", va="center")
         ax.spines[["top", "right", "left"]].set_visible(False)
-        ax.legend(loc="upper right", fontsize=6.5, framealpha=0.8,
+        ax.legend(loc="upper right", fontsize=BASE_FONT + 0.5, framealpha=0.8,
                   handlelength=1.0, ncol=2, borderpad=0.4)
 
     # ---- Section background bands -------------------------------------
@@ -339,26 +346,26 @@ def plot_choice_timeline(
     ax_mg_r.axhline(0.5, color="black", lw=0.5, ls="--", alpha=0.2)
     ax_mg_r.set_ylim(0, 1)
     ax_mg_r.set_yticks([0, 0.5, 1])
-    ax_mg_r.set_yticklabels(["0", ".5", "1"], fontsize=6)
-    ax_mg_r.set_ylabel("P(G)", fontsize=7, labelpad=2)
+    ax_mg_r.set_yticklabels(["0", ".5", "1"], fontsize=BASE_FONT)
+    ax_mg_r.set_ylabel("P(G)", fontsize=BASE_FONT + 1, labelpad=2)
     ax_mg_r.spines[["top", "left"]].set_visible(False)
 
     # ---- Section labels (left margin) --------------------------------
     for ax, label in [
         (ax_pg, "Participant"),
-        (ax_mg, f"RW model ({mode})\nα={alpha}, β={beta}, φ={phi}"),
+        (ax_mg, f"RW model "),
     ]:
         ax.text(
-            -0.055, 0.0, label,
+            -0.05, 0, label,
             transform=ax.transAxes,
-            fontsize=8, color="dimgray", fontweight="bold",
+            fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
             ha="right", va="bottom", linespacing=1.4,
         )
 
     # ---- Title --------------------------------------------------------
     ax_pg.set_title(
         f"Decision sequence ({mode}) — session {sess.id}",
-        fontsize=11, pad=8,
+        fontsize=BASE_FONT + 5, pad=8,
     )
 
     # ---- Alignment row -----------------------------------------------
@@ -384,18 +391,18 @@ def plot_choice_timeline(
 
     ax_al.set_ylim(0, 1.05)
     ax_al.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax_al.set_yticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"], fontsize=8)
-    ax_al.set_ylabel("Match\nrate", fontsize=9, labelpad=6,
+    ax_al.set_yticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"], fontsize=BASE_FONT + 2)
+    ax_al.set_ylabel("Match\nrate", fontsize=BASE_FONT + 3, labelpad=6,
                      rotation=0, ha="right", va="center")
-    ax_al.set_xlabel("Trial number", fontsize=10)
+    ax_al.set_xlabel("Trial number", fontsize=BASE_FONT + 4)
     ax_al.set_xlim(-1, n_trials)
     ax_al.spines[["top", "right"]].set_visible(False)
-    ax_al.legend(loc="upper left", fontsize=7.5, framealpha=0.85,
+    ax_al.legend(loc="upper left", fontsize=BASE_FONT + 1.5, framealpha=0.85,
                  borderpad=0.5)
     ax_al.text(
         -0.055, 0.0, "Alignment",
         transform=ax_al.transAxes,
-        fontsize=8, color="dimgray", fontweight="bold",
+        fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
         ha="right", va="bottom",
     )
 

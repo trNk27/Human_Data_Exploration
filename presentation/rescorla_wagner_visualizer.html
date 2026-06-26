@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rescorla–Wagner Model Visualizer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for time-series visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .tab-active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+        .tab-inactive { color: #6b7280; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.8rem; color: #374151; margin-bottom: 0.25rem; font-weight: 600; }
+        canvas { width: 100% !important; }
+        .tick-canvas { width: 100%; background: #fafafa; border-radius: 0.375rem; }
+        /* Q-value bars */
+        .qbar-track { height: 12px; background: #e5e7eb; border-radius: 9999px; overflow: hidden; position: relative; }
+        .qbar-fill { height: 100%; border-radius: 9999px; transition: width 0.35s cubic-bezier(.4,0,.2,1); }
+        /* equation chips */
+        .eq { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; line-height: 1.9; }
+        .hl-g { color: #4f46e5; font-weight: 600; }   /* Gamble / Q_G */
+        .hl-s { color: #0d9488; font-weight: 600; }   /* Safe / Q_S   */
+        .hl-p { color: #9333ea; font-weight: 600; }   /* P(Gamble)    */
+        .hl-pe{ color: #db2777; font-weight: 600; }   /* prediction error */
+        .step-cell { transition: all 0.15s; }
+        kbd { background:#1e293b; color:#e2e8f0; border-radius:4px; padding:1px 6px; font-size:0.72rem; font-family:'JetBrains Mono',monospace; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen pb-16">
+
+    <div class="max-w-6xl mx-auto px-4 pt-8">
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold tracking-tight text-slate-900">Rescorla–Wagner Model</h1>
+            <p class="text-slate-500 mt-2">Interactive walk-through of the trial-by-trial RW + softmax learner used in
+                <span class="mono text-slate-600">analysis/choice_timeline.py</span>.</p>
+        </header>
+
+        <!-- Model reference card -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Decision (softmax)</div>
+                    <div class="eq">P(<span class="hl-g">G</span>) = σ( β·(<span class="hl-g">Q_G</span> − <span class="hl-s">Q_S</span>) + φ·C<sub>t</sub> )</div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Learning (RW update)</div>
+                    <div class="eq">Q<sub>chosen</sub> ← Q<sub>chosen</sub> + α·(<span class="hl-pe">r − Q<sub>chosen</sub></span>)</div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Perseveration C<sub>t</sub></div>
+                    <div class="eq">+1 last=<span class="hl-g">G</span> · −1 last=<span class="hl-s">S</span> · 0 first</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                <button id="btn-tab-step" onclick="switchTab('step')" class="tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                    Step Through a Session
+                </button>
+                <button id="btn-tab-shadow" onclick="switchTab('shadow')" class="tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300">
+                    Shadowing Timeline
+                </button>
+            </nav>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- TAB 1: STEP THROUGH                                                    -->
+        <!-- ===================================================================== -->
+        <div id="tab-step" class="block space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                <!-- Controls -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 col-span-1 flex flex-col gap-5">
+                    <h2 class="text-lg font-semibold text-indigo-900 border-b pb-2">Model Parameters</h2>
+
+                    <!-- Mode toggle -->
+                    <div>
+                        <div class="slider-label"><span>Mode</span></div>
+                        <div class="flex rounded-lg overflow-hidden border border-slate-200 text-sm font-semibold">
+                            <button id="step-mode-shadow"   onclick="setStepMode('shadow')"   class="flex-1 py-2 bg-indigo-600 text-white">Shadow</button>
+                            <button id="step-mode-simulate" onclick="setStepMode('simulate')" class="flex-1 py-2 bg-white text-slate-600">Simulate</button>
+                        </div>
+                        <p id="step-mode-desc" class="text-xs text-slate-500 mt-2 leading-snug">
+                            <b>Shadow:</b> the model predicts each choice but <i>learns from the participant's</i> real choice &amp; reward.
+                        </p>
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>α — learning rate</span> <span id="sp-alpha-val" class="mono">0.10</span></div>
+                        <input type="range" id="sp-alpha" min="1" max="60" value="10" class="w-full accent-indigo-600" oninput="onStepParam()">
+                    </div>
+                    <div>
+                        <div class="slider-label"><span>β — inverse temperature</span> <span id="sp-beta-val" class="mono">5.0</span></div>
+                        <input type="range" id="sp-beta" min="1" max="150" value="50" class="w-full accent-indigo-600" oninput="onStepParam()">
+                    </div>
+                    <div>
+                        <div class="slider-label"><span>φ — perseveration</span> <span id="sp-phi-val" class="mono">0.0</span></div>
+                        <input type="range" id="sp-phi" min="-200" max="200" value="0" class="w-full accent-indigo-600" oninput="onStepParam()">
+                    </div>
+
+                    <div id="step-seed-wrap" class="hidden">
+                        <div class="slider-label"><span>Seed (simulate)</span> <span id="sp-seed-val" class="mono">7</span></div>
+                        <input type="range" id="sp-seed" min="1" max="40" value="7" class="w-full accent-teal-600" oninput="onStepParam()">
+                    </div>
+
+                    <div class="border-t pt-4">
+                        <div class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Navigation</div>
+                        <div class="flex gap-2">
+                            <button onclick="stepTo(0)"            class="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold">⏮ Reset</button>
+                            <button onclick="stepBy(-1)"           class="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold">◀ Prev</button>
+                            <button id="play-btn" onclick="togglePlay()" class="flex-1 py-2 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-semibold">▶ Play</button>
+                            <button onclick="stepBy(1)"            class="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold">Next ▶</button>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-2 text-center">
+                            <kbd>←</kbd> <kbd>→</kbd> step · <kbd>space</kbd> play/pause · <kbd>home</kbd>/<kbd>end</kbd> jump
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Main panel -->
+                <div class="col-span-1 md:col-span-2 space-y-4">
+
+                    <!-- Trial strip -->
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-semibold text-slate-700">Session timeline <span class="text-slate-400 font-normal">(click a trial to jump)</span></h3>
+                            <span id="step-counter" class="px-2 py-1 bg-indigo-100 text-indigo-800 text-xs font-bold rounded mono">Trial 1 / 18</span>
+                        </div>
+                        <div id="trial-strip" class="flex gap-1"></div>
+                        <div class="flex justify-between text-[10px] text-slate-400 mt-1 px-0.5">
+                            <span>Block A · P(big|G)=0.80</span><span>Block B · 0.20</span><span>Block C · 0.75</span>
+                        </div>
+                    </div>
+
+                    <!-- The four reasoning sub-cards -->
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-5">
+
+                        <!-- 1. State before -->
+                        <div class="space-y-3">
+                            <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">① Belief state (before trial)</h4>
+                            <div>
+                                <div class="flex justify-between text-xs mb-1"><span class="hl-g font-semibold">Q(Gamble)</span><span id="qg-num" class="mono">0.500</span></div>
+                                <div class="qbar-track"><div id="qg-bar" class="qbar-fill bg-indigo-500" style="width:50%"></div></div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-xs mb-1"><span class="hl-s font-semibold">Q(Safe)</span><span id="qs-num" class="mono">0.500</span></div>
+                                <div class="qbar-track"><div id="qs-bar" class="qbar-fill bg-teal-500" style="width:50%"></div></div>
+                            </div>
+                            <div id="ct-line" class="text-xs text-slate-500 mono pt-1">last choice: — &nbsp; C<sub>t</sub> = 0</div>
+                        </div>
+
+                        <!-- 2. Decision -->
+                        <div class="space-y-2">
+                            <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">② Decision (softmax)</h4>
+                            <div id="decision-eq" class="eq text-slate-700"></div>
+                            <div class="pt-1">
+                                <div class="flex justify-between text-xs mb-1"><span class="hl-p font-semibold">P(Gamble)</span><span id="pg-num" class="mono">0.500</span></div>
+                                <div class="qbar-track">
+                                    <div id="pg-bar" class="qbar-fill bg-purple-500" style="width:50%"></div>
+                                    <div class="absolute top-0 bottom-0" style="left:50%;width:1px;background:#475569;"></div>
+                                </div>
+                            </div>
+                            <div id="prediction-badge" class="text-sm font-semibold pt-1"></div>
+                        </div>
+
+                        <!-- 3. Outcome -->
+                        <div class="space-y-2">
+                            <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">③ Outcome</h4>
+                            <div id="outcome-body" class="text-sm text-slate-700 space-y-1"></div>
+                        </div>
+
+                        <!-- 4. Update -->
+                        <div class="space-y-2">
+                            <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">④ Learning update</h4>
+                            <div id="update-eq" class="eq text-slate-700"></div>
+                        </div>
+                    </div>
+
+                    <!-- Model fit: negative log-likelihood -->
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                            <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wide">⑤ Model fit — negative log-likelihood</h4>
+                            <span id="nll-total" class="px-2 py-1 bg-pink-100 text-pink-800 text-xs font-bold rounded mono">ΣNLL: 0.000</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 items-center">
+                            <div id="nll-eq" class="eq text-slate-700"></div>
+                            <div class="relative h-44 w-full"><canvas id="step-nll"></canvas></div>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mt-2 leading-snug">
+                            L<sub>t</sub> = probability the model assigned to the participant's <i>actual</i> choice. A confident
+                            correct call (L→1) adds ≈0; a confident miss (L→0) adds a large penalty. Summed over trials this is
+                            the cross-entropy the fitter (<span class="mono">fit_rw.py</span>) minimizes over α, β, φ.
+                        </p>
+                    </div>
+
+                    <!-- Trajectory chart -->
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Value trajectories (revealed up to current trial)</h3>
+                        <div class="relative h-56 w-full"><canvas id="step-traj"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- TAB 2: SHADOWING TIMELINE                                             -->
+        <!-- ===================================================================== -->
+        <div id="tab-shadow" class="hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                <!-- Controls -->
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 col-span-1 flex flex-col gap-5">
+                    <h2 class="text-lg font-semibold text-indigo-900 border-b pb-2">Model Parameters</h2>
+
+                    <div>
+                        <div class="slider-label"><span>Mode</span></div>
+                        <div class="flex rounded-lg overflow-hidden border border-slate-200 text-sm font-semibold">
+                            <button id="sh-mode-shadow"   onclick="setShadowMode('shadow')"   class="flex-1 py-2 bg-indigo-600 text-white">Shadow</button>
+                            <button id="sh-mode-simulate" onclick="setShadowMode('simulate')" class="flex-1 py-2 bg-white text-slate-600">Simulate</button>
+                        </div>
+                        <p id="sh-mode-desc" class="text-xs text-slate-500 mt-2 leading-snug">
+                            <b>Shadow:</b> model observes the participant — its row shows the <i>predicted</i> choice; match-rate is genuine prediction accuracy.
+                        </p>
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>α — learning rate</span> <span id="sh-alpha-val" class="mono">0.10</span></div>
+                        <input type="range" id="sh-alpha" min="1" max="60" value="10" class="w-full accent-indigo-600" oninput="updateShadow()">
+                    </div>
+                    <div>
+                        <div class="slider-label"><span>β — inverse temperature</span> <span id="sh-beta-val" class="mono">5.0</span></div>
+                        <input type="range" id="sh-beta" min="1" max="150" value="50" class="w-full accent-indigo-600" oninput="updateShadow()">
+                    </div>
+                    <div>
+                        <div class="slider-label"><span>φ — perseveration</span> <span id="sh-phi-val" class="mono">0.0</span></div>
+                        <input type="range" id="sh-phi" min="-200" max="200" value="0" class="w-full accent-indigo-600" oninput="updateShadow()">
+                    </div>
+                    <div>
+                        <div class="slider-label"><span>rolling window</span> <span id="sh-win-val" class="mono">5</span></div>
+                        <input type="range" id="sh-win" min="2" max="10" value="5" class="w-full accent-indigo-600" oninput="updateShadow()">
+                    </div>
+                    <div id="sh-seed-wrap" class="hidden">
+                        <div class="slider-label"><span>Seed (simulate)</span> <span id="sh-seed-val" class="mono">7</span></div>
+                        <input type="range" id="sh-seed" min="1" max="40" value="7" class="w-full accent-teal-600" oninput="updateShadow()">
+                    </div>
+
+                    <div class="border-t pt-3">
+                        <span id="sh-summary" class="block px-3 py-2 bg-indigo-50 text-indigo-800 text-sm font-bold rounded text-center mono">Overall accuracy: —</span>
+                    </div>
+
+                    <!-- legend -->
+                    <div class="text-xs text-slate-500 space-y-1 border-t pt-3">
+                        <div class="font-bold text-slate-400 uppercase tracking-wide text-[10px] mb-1">Legend</div>
+                        <div class="flex items-center gap-2"><span style="width:12px;height:12px;background:#FF8C00;display:inline-block;border-radius:2px;"></span> Gamble · rewarded</div>
+                        <div class="flex items-center gap-2"><span id="lg-gn" style="width:12px;height:12px;display:inline-block;border-radius:2px;"></span> Gamble · unrewarded</div>
+                        <div class="flex items-center gap-2"><span style="width:12px;height:12px;background:#2E8B57;display:inline-block;border-radius:2px;"></span> Safe · rewarded</div>
+                        <div class="flex items-center gap-2 opacity-50"><span id="lg-sn" style="width:12px;height:12px;display:inline-block;border-radius:2px;"></span> Safe · unrewarded <span class="text-[10px]">(never — Safe always pays)</span></div>
+                    </div>
+                </div>
+
+                <!-- Visualization -->
+                <div class="col-span-1 md:col-span-2 space-y-3">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Participant</div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="w-12 text-right text-xs font-semibold text-slate-500">Gamble</span>
+                            <canvas id="sh-part-g" class="tick-canvas" style="height:34px"></canvas>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-12 text-right text-xs font-semibold text-slate-500">Safe</span>
+                            <canvas id="sh-part-s" class="tick-canvas" style="height:34px"></canvas>
+                        </div>
+
+                        <div class="text-xs font-bold text-indigo-500 uppercase tracking-wide mb-2 mt-5">RW model <span id="sh-params-lbl" class="text-slate-400 font-normal normal-case"></span></div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="w-12 text-right text-xs font-semibold text-slate-500">Gamble</span>
+                            <canvas id="sh-model-g" class="tick-canvas" style="height:42px;background:#f0f4ff"></canvas>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-12 text-right text-xs font-semibold text-slate-500">Safe</span>
+                            <canvas id="sh-model-s" class="tick-canvas" style="height:34px;background:#f0f4ff"></canvas>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="w-12"></span>
+                            <canvas id="sh-axis" style="height:18px;width:100%"></canvas>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mt-1 pl-14">Thin black line on the model Gamble row = P(Gamble); dashed = 0.5 threshold.</p>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Alignment — rolling match rate (model choice == participant choice)</h3>
+                        <div class="relative h-52 w-full"><canvas id="sh-align"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // =========================================================================
+    //  SYNTHETIC SESSION  — three blocks of varying gamble reward probability.
+    //  Each trial: block, pBig = P(reward | Gamble), pSafe = P(reward | Safe),
+    //              choice (1=Gamble, 0=Safe), reward (1/0)  [participant's real data]
+    // =========================================================================
+    //  The Safe arm is a *guaranteed* reward: every Safe choice is rewarded (pSafe = 1).
+    const SESSION = [
+        // Block A — gamble pays well (P_big = 0.80)
+        {block:'A', pBig:0.80, pSafe:1.00, choice:1, reward:1},
+        {block:'A', pBig:0.80, pSafe:1.00, choice:1, reward:1},
+        {block:'A', pBig:0.80, pSafe:1.00, choice:1, reward:0},
+        {block:'A', pBig:0.80, pSafe:1.00, choice:1, reward:1},
+        {block:'A', pBig:0.80, pSafe:1.00, choice:1, reward:1},
+        {block:'A', pBig:0.80, pSafe:1.00, choice:0, reward:1},  // participant samples Safe (always rewarded)
+        // Block B — gamble turns bad (P_big = 0.20)
+        {block:'B', pBig:0.20, pSafe:1.00, choice:1, reward:0},
+        {block:'B', pBig:0.20, pSafe:1.00, choice:1, reward:0},
+        {block:'B', pBig:0.20, pSafe:1.00, choice:0, reward:1},  // switches to Safe
+        {block:'B', pBig:0.20, pSafe:1.00, choice:0, reward:1},
+        {block:'B', pBig:0.20, pSafe:1.00, choice:0, reward:1},
+        {block:'B', pBig:0.20, pSafe:1.00, choice:0, reward:1},
+        // Block C — gamble good again (P_big = 0.75)
+        {block:'C', pBig:0.75, pSafe:1.00, choice:0, reward:1},  // still on Safe
+        {block:'C', pBig:0.75, pSafe:1.00, choice:1, reward:1},  // re-explores Gamble
+        {block:'C', pBig:0.75, pSafe:1.00, choice:1, reward:1},
+        {block:'C', pBig:0.75, pSafe:1.00, choice:1, reward:1},
+        {block:'C', pBig:0.75, pSafe:1.00, choice:1, reward:0},
+        {block:'C', pBig:0.75, pSafe:1.00, choice:1, reward:1},
+    ];
+    const N = SESSION.length;
+
+    // =========================================================================
+    //  COLOUR UTILITIES  (mirror choice_timeline.desaturate)
+    // =========================================================================
+    const C_GR = [255, 140, 0];   // darkorange — gamble rewarded
+    const C_SR = [46, 139, 87];   // seagreen   — safe rewarded
+    function desaturate(rgb, factor) {
+        const [r, g, b] = rgb;
+        const grey = 0.299 * r + 0.587 * g + 0.114 * b;
+        return [grey + factor * (r - grey), grey + factor * (g - grey), grey + factor * (b - grey)].map(Math.round);
+    }
+    const C_GN = desaturate(C_GR, 0.28);   // muted orange — gamble unrewarded
+    const C_SN = desaturate(C_SR, 0.28);   // muted green  — safe unrewarded
+    const rgb = a => `rgb(${a[0]},${a[1]},${a[2]})`;
+
+    // =========================================================================
+    //  SEEDED RNG  (mulberry32) — reproducible "simulate" mode
+    // =========================================================================
+    function mulberry32(seed) {
+        let a = seed >>> 0;
+        return function () {
+            a |= 0; a = (a + 0x6D2B79F5) | 0;
+            let t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    // =========================================================================
+    //  RW + SOFTMAX ENGINE  (port of run_rw_model)
+    //  Returns a per-trial record with every intermediate quantity.
+    // =========================================================================
+    function runRW({ alpha, beta, phi, mode, seed }) {
+        const rand = mulberry32(seed || 7);
+        let qG = 0.5, qS = 0.5;
+        let last = null;                       // previous driving choice (1/0)
+        let cumNLL = 0;                         // running negative log-likelihood (fit objective)
+        const steps = [];
+
+        for (let t = 0; t < N; t++) {
+            const tr = SESSION[t];
+            const qG_before = qG, qS_before = qS;
+            const c_t = last === null ? 0 : (last === 1 ? 1 : -1);
+            const z = beta * (qG - qS) + phi * c_t;
+            const pG = 1 / (1 + Math.exp(-z));
+            const prediction = pG >= 0.5 ? 1 : 0;     // model's argmax choice
+
+            // Likelihood of the participant's ACTUAL choice under the model's P(G).
+            // This is the per-trial term the fitter (fit_rw.py) sums and minimizes.
+            const lik = tr.choice === 1 ? pG : (1 - pG);
+            const nll_t = -Math.log(Math.max(lik, 1e-12));
+            const cumNLL_before = cumNLL;
+            cumNLL += nll_t;
+
+            let chosen, reward, u = null, uR = null, rewardProb = null;
+            if (mode === 'shadow') {
+                chosen = tr.choice;                   // learn from participant
+                reward = tr.reward;
+            } else {                                  // simulate — sample own choice & reward
+                u = rand();
+                chosen = u < pG ? 1 : 0;
+                rewardProb = chosen === 1 ? tr.pBig : tr.pSafe;
+                uR = rand();
+                reward = uR < rewardProb ? 1 : 0;
+            }
+
+            const pe = reward - (chosen === 1 ? qG : qS);   // prediction error δ
+            if (chosen === 1) qG = qG + alpha * pe; else qS = qS + alpha * pe;
+            last = chosen;
+
+            steps.push({
+                t, block: tr.block, pBig: tr.pBig, pSafe: tr.pSafe,
+                qG_before, qS_before, c_t, z, pG, prediction,
+                participantChoice: tr.choice, participantReward: tr.reward,
+                chosen, reward, rewardProb, u, uR, pe,
+                lik, nll_t, cumNLL_before, cumNLL,
+                qG_after: qG, qS_after: qS,
+                modelChoice: mode === 'shadow' ? prediction : chosen,   // what the model "did"
+                match: (mode === 'shadow' ? prediction : chosen) === tr.choice ? 1 : 0,
+            });
+        }
+        return steps;
+    }
+
+    // small formatting helper
+    const f = (x, d = 3) => x.toFixed(d);
+    const sgn = x => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(3);
+
+    // =========================================================================
+    //  STEP-THROUGH TAB
+    // =========================================================================
+    const stepState = { mode: 'shadow', alpha: 0.10, beta: 5.0, phi: 0.0, seed: 7, idx: 0, steps: [] };
+    let trajChart = null;
+    let nllChart = null;
+    let playTimer = null;
+
+    function readStepParams() {
+        stepState.alpha = parseInt(document.getElementById('sp-alpha').value) / 100;   // 0.01–0.60
+        stepState.beta  = parseInt(document.getElementById('sp-beta').value) / 10;      // 0.1–15
+        stepState.phi   = parseInt(document.getElementById('sp-phi').value) / 100;      // −2–2
+        stepState.seed  = parseInt(document.getElementById('sp-seed').value);
+        document.getElementById('sp-alpha-val').innerText = f(stepState.alpha, 2);
+        document.getElementById('sp-beta-val').innerText  = f(stepState.beta, 1);
+        document.getElementById('sp-phi-val').innerText   = f(stepState.phi, 2);
+        document.getElementById('sp-seed-val').innerText  = stepState.seed;
+    }
+
+    function setStepMode(mode) {
+        stepState.mode = mode;
+        document.getElementById('step-mode-shadow').className   = 'flex-1 py-2 ' + (mode === 'shadow'   ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600');
+        document.getElementById('step-mode-simulate').className = 'flex-1 py-2 ' + (mode === 'simulate' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600');
+        document.getElementById('step-seed-wrap').classList.toggle('hidden', mode !== 'simulate');
+        document.getElementById('step-mode-desc').innerHTML = mode === 'shadow'
+            ? "<b>Shadow:</b> the model predicts each choice but <i>learns from the participant's</i> real choice &amp; reward. Match = prediction accuracy."
+            : "<b>Simulate:</b> the model <i>free-runs</i> — it samples its own choice from P(Gamble) and its own reward, then learns from those.";
+        onStepParam();
+    }
+
+    function onStepParam() {
+        readStepParams();
+        stepState.steps = runRW(stepState);
+        buildTrialStrip();
+        renderStep();
+        updateTrajChart();
+        updateNllChart();
+    }
+
+    function stepTo(i) {
+        stepState.idx = Math.max(0, Math.min(N - 1, i));
+        renderStep();
+        updateTrajChart();
+        updateNllChart();
+    }
+    function stepBy(d) { stepTo(stepState.idx + d); }
+
+    function togglePlay() {
+        const btn = document.getElementById('play-btn');
+        if (playTimer) {
+            clearInterval(playTimer); playTimer = null;
+            btn.innerText = '▶ Play';
+            btn.className = 'flex-1 py-2 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-sm font-semibold';
+        } else {
+            if (stepState.idx >= N - 1) stepTo(0);
+            playTimer = setInterval(() => {
+                if (stepState.idx >= N - 1) { togglePlay(); return; }
+                stepBy(1);
+            }, 1300);
+            btn.innerText = '⏸ Pause';
+            btn.className = 'flex-1 py-2 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-700 text-sm font-semibold';
+        }
+    }
+
+    // --- the clickable trial strip ------------------------------------------
+    function cellColor(s) {
+        const c = s.participantChoice, r = s.participantReward;
+        if (c === 1) return rgb(r === 1 ? C_GR : C_GN);
+        return rgb(r === 1 ? C_SR : C_SN);
+    }
+    function buildTrialStrip() {
+        const strip = document.getElementById('trial-strip');
+        strip.innerHTML = '';
+        const blockBorder = { A: '#c7d2fe', B: '#fbcfe8', C: '#bbf7d0' };
+        stepState.steps.forEach((s, i) => {
+            const cell = document.createElement('div');
+            cell.className = 'step-cell flex-1 cursor-pointer rounded-sm';
+            cell.style.height = '26px';
+            cell.style.background = cellColor(s);
+            cell.style.borderTop = `4px solid ${blockBorder[s.block]}`;
+            cell.title = `Trial ${i + 1} (Block ${s.block})`;
+            cell.onclick = () => stepTo(i);
+            strip.appendChild(cell);
+        });
+        highlightCell();
+    }
+    function highlightCell() {
+        [...document.getElementById('trial-strip').children].forEach((c, i) => {
+            const cur = i === stepState.idx;
+            c.style.outline = cur ? '3px solid #4f46e5' : 'none';
+            c.style.outlineOffset = cur ? '1px' : '0';
+            c.style.transform = cur ? 'scaleY(1.25)' : 'scaleY(1)';
+            c.style.zIndex = cur ? 5 : 1;
+            c.style.position = 'relative';
+        });
+    }
+
+    const choiceName = c => (c === 1 ? 'GAMBLE' : 'SAFE');
+    const choiceClass = c => (c === 1 ? 'hl-g' : 'hl-s');
+
+    function renderStep() {
+        const s = stepState.steps[stepState.idx];
+        const i = stepState.idx;
+        document.getElementById('step-counter').innerText = `Trial ${i + 1} / ${N}  ·  Block ${s.block}`;
+        highlightCell();
+
+        // ① state before
+        document.getElementById('qg-num').innerText = f(s.qG_before);
+        document.getElementById('qs-num').innerText = f(s.qS_before);
+        document.getElementById('qg-bar').style.width = (100 * Math.max(0, Math.min(1, s.qG_before))) + '%';
+        document.getElementById('qs-bar').style.width = (100 * Math.max(0, Math.min(1, s.qS_before))) + '%';
+        const lastTxt = i === 0 ? '—' : choiceName(stepState.steps[i - 1].chosen);
+        document.getElementById('ct-line').innerHTML =
+            `last choice: <b>${lastTxt}</b> &nbsp; C<sub>t</sub> = <b>${s.c_t > 0 ? '+1' : s.c_t}</b>` +
+            `<br><span class="text-slate-400">P(big|Gamble) = ${f(s.pBig,2)} · P(reward|Safe) = ${f(s.pSafe,2)}</span>`;
+
+        // ② decision
+        const ctTerm = `${stepState.phi >= 0 ? '+' : '−'} ${Math.abs(stepState.phi).toFixed(2)}·(${s.c_t})`;
+        document.getElementById('decision-eq').innerHTML =
+            `P(<span class="hl-g">G</span>) = σ( ${f(stepState.beta,1)}·(<span class="hl-g">${f(s.qG_before)}</span> − <span class="hl-s">${f(s.qS_before)}</span>) ${ctTerm} )<br>` +
+            `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = σ( ${sgn(s.z)} ) = <span class="hl-p">${f(s.pG)}</span>`;
+        document.getElementById('pg-num').innerText = f(s.pG);
+        document.getElementById('pg-bar').style.width = (100 * s.pG) + '%';
+        document.getElementById('prediction-badge').innerHTML =
+            `→ model predicts <span class="${choiceClass(s.prediction)}">${choiceName(s.prediction)}</span> ` +
+            `<span class="text-slate-400 text-xs">(P(G) ${s.pG >= 0.5 ? '≥' : '<'} 0.5)</span>`;
+
+        // ③ outcome
+        const out = document.getElementById('outcome-body');
+        const rewBadge = r => r === 1
+            ? '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-xs font-bold">REWARDED</span>'
+            : '<span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 text-xs font-bold">no reward</span>';
+        if (stepState.mode === 'shadow') {
+            const ok = s.match === 1;
+            out.innerHTML =
+                `Participant chose <span class="${choiceClass(s.participantChoice)} font-semibold">${choiceName(s.participantChoice)}</span> &nbsp; ${rewBadge(s.participantReward)}<br>` +
+                `<span class="${ok ? 'text-emerald-600' : 'text-rose-600'} font-semibold">${ok ? '✓ prediction matches' : '✗ prediction misses'}</span>` +
+                `<div class="text-xs text-slate-400 pt-1">Q is updated from the <i>participant's</i> choice &amp; reward.</div>`;
+        } else {
+            out.innerHTML =
+                `Sampled choice: u=${f(s.u,2)} ${s.u < s.pG ? '<' : '≥'} P(G)=${f(s.pG,2)} → <span class="${choiceClass(s.chosen)} font-semibold">${choiceName(s.chosen)}</span><br>` +
+                `Sampled reward: u=${f(s.uR,2)} ${s.uR < s.rewardProb ? '<' : '≥'} ${f(s.rewardProb,2)} → ${rewBadge(s.reward)}` +
+                `<div class="text-xs ${s.match ? 'text-emerald-600' : 'text-rose-600'} pt-1">${s.match ? '✓ same as participant' : '✗ differs from participant'} (chose ${choiceName(s.participantChoice)})</div>`;
+        }
+
+        // ④ update
+        const arm = s.chosen === 1 ? 'Gamble' : 'Safe';
+        const armCls = choiceClass(s.chosen);
+        const qBefore = s.chosen === 1 ? s.qG_before : s.qS_before;
+        const qAfter  = s.chosen === 1 ? s.qG_after  : s.qS_after;
+        const otherArm = s.chosen === 1 ? 'Safe' : 'Gamble';
+        document.getElementById('update-eq').innerHTML =
+            `<span class="hl-pe">δ</span> = r − Q<sub>${arm}</sub> = ${s.reward} − ${f(qBefore)} = <span class="hl-pe">${sgn(s.pe)}</span><br>` +
+            `Q<sub><span class="${armCls}">${arm}</span></sub> ← ${f(qBefore)} + ${f(stepState.alpha,2)}·(<span class="hl-pe">${sgn(s.pe)}</span>)<br>` +
+            `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = <span class="${armCls} font-bold">${f(qAfter)}</span> ` +
+            `<span class="text-slate-400 text-xs">(Q<sub>${otherArm}</sub> unchanged)</span>`;
+
+        // ⑤ negative log-likelihood — likelihood of the participant's ACTUAL choice
+        const actCls = choiceClass(s.participantChoice);
+        const actName = choiceName(s.participantChoice);
+        const likExpr = s.participantChoice === 1
+            ? `P(<span class="hl-g">G</span>) = ${f(s.pG)}`
+            : `1 − P(<span class="hl-g">G</span>) = ${f(1 - s.pG)}`;
+        const surprise = s.nll_t > 1.0 ? 'text-rose-600 font-bold' : 'hl-pe';
+        document.getElementById('nll-eq').innerHTML =
+            `participant chose <span class="${actCls} font-semibold">${actName}</span> → likelihood under model:<br>` +
+            `L<sub>t</sub> = ${likExpr} = <b>${f(s.lik)}</b><br>` +
+            `−ln L<sub>t</sub> = −ln(${f(s.lik)}) = <span class="${surprise}">${f(s.nll_t)}</span><br>` +
+            `ΣNLL: ${f(s.cumNLL_before)} → <b>${f(s.cumNLL)}</b> &nbsp;<span class="text-slate-400">(+${f(s.nll_t)})</span>`;
+        const grandTotal = stepState.steps[N - 1].cumNLL;
+        document.getElementById('nll-total').innerText = `Σ to trial ${i + 1}: ${f(s.cumNLL)}  ·  total ${f(grandTotal)}`;
+    }
+
+    // --- trajectory chart (progressive reveal) ------------------------------
+    function initTrajChart() {
+        const labels = Array.from({ length: N }, (_, i) => i + 1);
+        trajChart = new Chart(document.getElementById('step-traj').getContext('2d'), {
+            type: 'line',
+            data: { labels, datasets: [] },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+                interaction: { intersect: false, mode: 'index' },
+                scales: {
+                    x: { title: { display: true, text: 'Trial' } },
+                    y: { min: 0, max: 1, title: { display: true, text: 'value / probability' } }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+    }
+    function updateTrajChart() {
+        if (!trajChart) return;
+        const cur = stepState.idx;
+        // reveal Q-values *after* each completed trial, P(G) at decision time
+        const mask = (arr) => arr.map((v, i) => (i <= cur ? v : null));
+        const qG = stepState.steps.map(s => s.qG_after);
+        const qS = stepState.steps.map(s => s.qS_after);
+        const pG = stepState.steps.map(s => s.pG);
+        const curMark = stepState.steps.map((s, i) => (i === cur ? s.qG_after : null));
+        trajChart.data.datasets = [
+            { label: 'Q(Gamble)', data: mask(qG), borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,0.08)', tension: 0.15, pointRadius: 2, fill: false },
+            { label: 'Q(Safe)',   data: mask(qS), borderColor: '#0d9488', tension: 0.15, pointRadius: 2 },
+            { label: 'P(Gamble)', data: mask(pG), borderColor: '#9333ea', borderDash: [4, 3], tension: 0.15, pointRadius: 0 },
+            { label: '0.5', data: stepState.steps.map(() => 0.5), borderColor: '#cbd5e1', borderWidth: 1, borderDash: [2, 4], pointRadius: 0 },
+            { label: 'current', data: curMark, borderColor: '#ef4444', backgroundColor: '#ef4444', pointRadius: 6, showLine: false }
+        ];
+        trajChart.update();
+    }
+
+    // --- NLL chart: per-trial surprise (bars) + cumulative NLL (line) -------
+    function initNllChart() {
+        const labels = Array.from({ length: N }, (_, i) => i + 1);
+        nllChart = new Chart(document.getElementById('step-nll').getContext('2d'), {
+            type: 'bar',
+            data: { labels, datasets: [] },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+                interaction: { intersect: false, mode: 'index' },
+                scales: {
+                    x: { title: { display: true, text: 'Trial' } },
+                    y:  { position: 'left',  beginAtZero: true, title: { display: true, text: '−ln Lₜ (trial)' } },
+                    y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'Σ NLL' } }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+    }
+    function updateNllChart() {
+        if (!nllChart) return;
+        const cur = stepState.idx;
+        const mask = arr => arr.map((v, i) => (i <= cur ? v : null));
+        const perTrial = stepState.steps.map(s => s.nll_t);
+        const cumulative = stepState.steps.map(s => s.cumNLL);
+        // highlight the current trial's bar in rose, past trials in pink
+        const barColors = stepState.steps.map((_, i) => (i === cur ? '#db2777' : 'rgba(219,39,119,0.35)'));
+        nllChart.data.datasets = [
+            { type: 'bar', label: 'per-trial −ln Lₜ', data: mask(perTrial), backgroundColor: barColors, yAxisID: 'y', order: 2 },
+            { type: 'line', label: 'cumulative Σ NLL', data: mask(cumulative), borderColor: '#7c3aed',
+              backgroundColor: 'rgba(124,58,237,0.08)', tension: 0.15, pointRadius: 2, yAxisID: 'y1', order: 1, fill: false }
+        ];
+        nllChart.update();
+    }
+
+    // =========================================================================
+    //  SHADOWING TIMELINE TAB
+    // =========================================================================
+    let alignChart = null;
+
+    function readShadowParams() {
+        const m = { };
+        m.alpha = parseInt(document.getElementById('sh-alpha').value) / 100;
+        m.beta  = parseInt(document.getElementById('sh-beta').value) / 10;
+        m.phi   = parseInt(document.getElementById('sh-phi').value) / 100;
+        m.win   = parseInt(document.getElementById('sh-win').value);
+        m.seed  = parseInt(document.getElementById('sh-seed').value);
+        m.mode  = shadowMode;
+        document.getElementById('sh-alpha-val').innerText = f(m.alpha, 2);
+        document.getElementById('sh-beta-val').innerText  = f(m.beta, 1);
+        document.getElementById('sh-phi-val').innerText   = f(m.phi, 2);
+        document.getElementById('sh-win-val').innerText   = m.win;
+        document.getElementById('sh-seed-val').innerText  = m.seed;
+        return m;
+    }
+
+    let shadowMode = 'shadow';
+    function setShadowMode(mode) {
+        shadowMode = mode;
+        document.getElementById('sh-mode-shadow').className   = 'flex-1 py-2 ' + (mode === 'shadow'   ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600');
+        document.getElementById('sh-mode-simulate').className = 'flex-1 py-2 ' + (mode === 'simulate' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600');
+        document.getElementById('sh-seed-wrap').classList.toggle('hidden', mode !== 'simulate');
+        document.getElementById('sh-mode-desc').innerHTML = mode === 'shadow'
+            ? "<b>Shadow:</b> model observes the participant — its row shows the <i>predicted</i> choice; match-rate is genuine prediction accuracy."
+            : "<b>Simulate:</b> model free-runs — its row shows its <i>own</i> sampled choice &amp; reward, drifting from the participant.";
+        updateShadow();
+    }
+
+    // canvas tick-row drawing: items = [{trials:[i...], color}], optional pGline array
+    function drawTickRow(canvasId, items, pGline) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const w = rect.width, h = rect.height;
+        ctx.clearRect(0, 0, w, h);
+        const pad = 6;
+        const xOf = i => pad + (N === 1 ? 0 : (i / (N - 1)) * (w - 2 * pad));
+
+        // faint per-trial gridlines
+        ctx.strokeStyle = '#eceff3'; ctx.lineWidth = 1;
+        for (let i = 0; i < N; i++) { ctx.beginPath(); ctx.moveTo(xOf(i), 2); ctx.lineTo(xOf(i), h - 2); ctx.stroke(); }
+
+        // ticks
+        items.forEach(group => {
+            ctx.strokeStyle = group.color; ctx.lineWidth = 2.4; ctx.beginPath();
+            group.trials.forEach(i => {
+                const x = xOf(i);
+                ctx.moveTo(x, h * 0.18); ctx.lineTo(x, h * 0.82);
+            });
+            ctx.stroke();
+        });
+
+        // optional P(Gamble) overlay
+        if (pGline) {
+            ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 1.2; ctx.beginPath();
+            pGline.forEach((p, i) => {
+                const x = xOf(i), y = h - pad - p * (h - 2 * pad);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            // 0.5 dashed
+            ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.setLineDash([3, 3]); ctx.beginPath();
+            const y05 = h - pad - 0.5 * (h - 2 * pad);
+            ctx.moveTo(pad, y05); ctx.lineTo(w - pad, y05); ctx.stroke(); ctx.setLineDash([]);
+        }
+    }
+
+    function drawAxis(canvasId) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const w = rect.width, h = rect.height, pad = 6;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#94a3b8'; ctx.font = '10px Inter'; ctx.textAlign = 'center';
+        for (let i = 0; i < N; i++) {
+            if (i % 2 === 0 || i === N - 1) {
+                const x = pad + (i / (N - 1)) * (w - 2 * pad);
+                ctx.fillText(i + 1, x, 12);
+            }
+        }
+    }
+
+    function initAlignChart() {
+        const labels = Array.from({ length: N }, (_, i) => i + 1);
+        alignChart = new Chart(document.getElementById('sh-align').getContext('2d'), {
+            type: 'line',
+            data: { labels, datasets: [] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: 'Trial' } },
+                    y: { min: 0, max: 1.02, title: { display: true, text: 'match rate' },
+                         ticks: { callback: v => Math.round(v * 100) + '%' } }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+    }
+
+    function updateShadow() {
+        const m = readShadowParams();
+        const steps = runRW({ alpha: m.alpha, beta: m.beta, phi: m.phi, mode: m.mode, seed: m.seed });
+        document.getElementById('sh-params-lbl').innerText = `(α=${f(m.alpha,2)}, β=${f(m.beta,1)}, φ=${f(m.phi,2)}, ${m.mode})`;
+
+        // --- participant rows (always the real data) ---
+        const pG_r = [], pG_n = [], pS_r = [], pS_n = [];
+        SESSION.forEach((tr, i) => {
+            if (tr.choice === 1) (tr.reward ? pG_r : pG_n).push(i);
+            else                 (tr.reward ? pS_r : pS_n).push(i);
+        });
+        drawTickRow('sh-part-g', [{ trials: pG_r, color: rgb(C_GR) }, { trials: pG_n, color: rgb(C_GN) }]);
+        drawTickRow('sh-part-s', [{ trials: pS_r, color: rgb(C_SR) }, { trials: pS_n, color: rgb(C_SN) }]);
+
+        // --- model rows (modelChoice × that row's reward) ---
+        const mG_r = [], mG_n = [], mS_r = [], mS_n = [];
+        steps.forEach((s, i) => {
+            // reward shown on the model row: participant reward (shadow) or sampled (simulate)
+            const r = s.reward;
+            if (s.modelChoice === 1) (r ? mG_r : mG_n).push(i);
+            else                     (r ? mS_r : mS_n).push(i);
+        });
+        const pGline = steps.map(s => s.pG);
+        drawTickRow('sh-model-g', [{ trials: mG_r, color: rgb(C_GR) }, { trials: mG_n, color: rgb(C_GN) }], pGline);
+        drawTickRow('sh-model-s', [{ trials: mS_r, color: rgb(C_SR) }, { trials: mS_n, color: rgb(C_SN) }]);
+        drawAxis('sh-axis');
+
+        // --- rolling match rate ---
+        const matches = steps.map(s => s.match);
+        const roll = matches.map((_, k) => {
+            const lo = Math.max(0, k - m.win + 1);
+            const slice = matches.slice(lo, k + 1);
+            return slice.reduce((a, b) => a + b, 0) / slice.length;
+        });
+        const overall = matches.reduce((a, b) => a + b, 0) / N;
+        const word = m.mode === 'shadow' ? 'accuracy' : 'match';
+        const totalNLL = steps[N - 1].cumNLL;
+        document.getElementById('sh-summary').innerHTML =
+            `Overall ${word}: ${(overall * 100).toFixed(0)}%<br>` +
+            `<span class="text-pink-700">ΣNLL: ${f(totalNLL)}</span> ` +
+            `<span class="text-slate-400 font-normal">(${f(totalNLL / N)}/trial)</span>`;
+
+        alignChart.data.datasets = [
+            { label: `Rolling ${m.win}-trial match`, data: roll, borderColor: '#4682b4', borderWidth: 2,
+              tension: 0.2, pointRadius: 2,
+              fill: { value: 0.5, above: 'rgba(70,130,180,0.15)', below: 'rgba(178,34,34,0.15)' } },
+            { label: 'Chance (50%)', data: steps.map(() => 0.5), borderColor: '#9ca3af', borderDash: [5, 5], pointRadius: 0 },
+            { label: `Overall ${word}: ${(overall * 100).toFixed(0)}%`, data: steps.map(() => overall),
+              borderColor: '#4682b4', borderDash: [2, 3], borderWidth: 1, pointRadius: 0 }
+        ];
+        alignChart.update();
+    }
+
+    // =========================================================================
+    //  TABS + KEYBOARD + INIT
+    // =========================================================================
+    const TAB_ACTIVE = "tab-active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm";
+    const TAB_INACTIVE = "tab-inactive whitespace-nowrap py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700 hover:border-gray-300";
+    let activeTab = 'step';
+    function switchTab(tab) {
+        activeTab = tab;
+        ['step', 'shadow'].forEach(name => {
+            const on = name === tab;
+            document.getElementById('tab-' + name).classList.toggle('hidden', !on);
+            document.getElementById('btn-tab-' + name).className = on ? TAB_ACTIVE : TAB_INACTIVE;
+        });
+        if (tab === 'shadow') updateShadow();
+        else { renderStep(); updateTrajChart(); updateNllChart(); }
+    }
+
+    document.addEventListener('keydown', e => {
+        if (activeTab !== 'step') return;
+        if (['ArrowRight', 'ArrowLeft', 'Home', 'End', ' '].includes(e.key)) e.preventDefault();
+        if (e.key === 'ArrowRight') stepBy(1);
+        else if (e.key === 'ArrowLeft') stepBy(-1);
+        else if (e.key === 'Home') stepTo(0);
+        else if (e.key === 'End') stepTo(N - 1);
+        else if (e.key === ' ') togglePlay();
+    });
+
+    window.onload = function () {
+        // legend swatches that need computed colours
+        document.getElementById('lg-gn').style.background = rgb(C_GN);
+        document.getElementById('lg-sn').style.background = rgb(C_SN);
+
+        initTrajChart();
+        initNllChart();
+        initAlignChart();
+
+        readStepParams();
+        stepState.steps = runRW(stepState);
+        buildTrialStrip();
+        renderStep();
+        updateTrajChart();
+        updateNllChart();
+
+        window.addEventListener('resize', () => {
+            if (activeTab === 'shadow') updateShadow();
+        });
+    };
+    </script>
+</body>
+</html>
