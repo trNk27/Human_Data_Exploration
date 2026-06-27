@@ -105,6 +105,30 @@ def load_stmtx(data_dir=None):
     return pd.DataFrame(matrix, columns=cols)
 
 
+def load_unit_info(data_dir=None):
+    """Structured per-neuron metadata from ``STMtx.mat``'s ``infoCell``.
+
+    ``infoCell`` is ``(nNeurons, 4)``: area, electrode, unit, type. Returns a
+    DataFrame with one row per neuron, in the same order as the spike-train columns
+    (so row *i* describes neuron *i*), with clean string columns
+    ``region``, ``electrode``, ``unit_id``, ``unit_type``. Use this instead of
+    parsing the composite label produced by :func:`load_stmtx`.
+    """
+    data_dir = data_dir or DATA_DIR
+    data = scipy.io.loadmat(os.path.join(data_dir, "STMtx.mat"))
+    info = data["infoCell"]
+
+    def clean(cell):
+        return str(cell).strip().strip("[]'\"")
+
+    return pd.DataFrame({
+        "region":    [clean(info[i, 0]) for i in range(info.shape[0])],
+        "electrode": [clean(info[i, 1]) for i in range(info.shape[0])],
+        "unit_id":   [clean(info[i, 2]) for i in range(info.shape[0])],
+        "unit_type": [clean(info[i, 3]) for i in range(info.shape[0])],
+    })
+
+
 def load_trials_sync(data_dir=None):
     data_dir = data_dir or DATA_DIR
     data   = scipy.io.loadmat(os.path.join(data_dir, "Trials_Sync.mat"))
