@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HGF — The Three Layers & How They Couple</title>
+    <!-- Tailwind for layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for trajectories -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- MathJax for the equations -->
+    <script>
+      window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['$$', '$$']] }, svg: { fontCache: 'global' } };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        canvas { width: 100% !important; }
+        .raster-canvas { height: 42px; width: 100%; border-bottom: 1px solid #e5e7eb; background: #fafafa; border-radius: .375rem; }
+        /* node colour keys */
+        .c-l3 { color:#7c3aed; }   /* level 3 — volatility   */
+        .c-l2 { color:#4f46e5; }   /* level 2 — tendency     */
+        .c-l1 { color:#0d9488; }   /* level 1 — outcome      */
+        .c-pe { color:#e11d48; }   /* prediction error       */
+        /* SVG diagram animation */
+        .flow-gen path, .flow-gen line { stroke:#6366f1; }
+        .flow-upd path, .flow-upd line { stroke:#e11d48; }
+        .arrow { transition: opacity .25s, stroke-width .25s; }
+        .arrow.dim { opacity:.18; }
+        .arrow.hot { stroke-width:4 !important; opacity:1; }
+        .node-card { transition: box-shadow .25s, transform .25s; }
+        .node-card.hot { box-shadow:0 0 0 4px rgba(99,102,241,.35); }
+        .pulse { animation: pulse 1.1s ease-out; }
+        @keyframes pulse { 0%{ r:0; opacity:.9;} 100%{ r:26px; opacity:0;} }
+        .legend-dot { display:inline-block; width:.7rem; height:.7rem; border-radius:9999px; margin-right:.3rem; vertical-align:middle; }
+        .eqbox { background:#fff; border:1px solid #eef2ff; border-radius:.6rem; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen pb-16">
+<div class="max-w-7xl mx-auto px-4 pt-8">
+
+    <header class="mb-6">
+        <h1 class="text-3xl font-bold tracking-tight text-slate-900">The Hierarchical Gaussian Filter — three layers, two directions</h1>
+        <p class="text-slate-500 mt-2 max-w-3xl">A 3-level binary HGF (Mathys et&nbsp;al. 2011, 2014), the perceptual model fit in
+        <span class="font-mono text-slate-600">analysis/hgf/model.py</span>. Each layer is a Gaussian belief; the layer
+        <em>above</em> sets the <strong>volatility</strong> of the one below. Predictions flow <span class="c-l2 font-semibold">down</span>,
+        precision-weighted prediction errors flow <span class="c-pe font-semibold">up</span>.</p>
+    </header>
+
+    <!-- ============================ ARCHITECTURE DIAGRAM ============================ -->
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
+
+        <!-- left: the layered diagram -->
+        <div class="lg:col-span-3 bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <h2 class="text-lg font-semibold text-slate-800">The generative hierarchy</h2>
+                <div class="text-xs text-slate-500 flex gap-4">
+                    <span><span class="legend-dot" style="background:#6366f1"></span>top-down (prediction / coupling)</span>
+                    <span><span class="legend-dot" style="background:#e11d48"></span>bottom-up (prediction error / update)</span>
+                </div>
+            </div>
+
+            <svg id="diagram" viewBox="0 0 560 560" class="w-full" style="max-height:560px"></svg>
+
+            <div class="flex items-center gap-3 mt-3 flex-wrap">
+                <button id="btn-play"  class="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 shadow-sm">▶ Play trial-by-trial</button>
+                <button id="btn-step"  class="px-3 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-200">Step ▸</button>
+                <button id="btn-rew"   class="px-3 py-2 bg-emerald-100 text-emerald-800 text-sm font-semibold rounded-lg hover:bg-emerald-200">+ reward</button>
+                <button id="btn-norew" class="px-3 py-2 bg-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-300">+ no reward</button>
+                <button id="btn-restart" class="px-3 py-2 bg-rose-50 text-rose-700 text-sm font-semibold rounded-lg hover:bg-rose-100">↺ restart</button>
+                <span class="text-sm text-slate-500 ml-auto">trial <span id="trial-k" class="font-mono font-semibold text-slate-700">0</span></span>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">"Play" replays the same switching reward world. Watch the arrows light up: each outcome
+            sends an error up the hierarchy; each prediction comes back down. The top layer barely moves on calm runs and jumps when the world changes.</p>
+        </div>
+
+        <!-- right: live numbers per layer -->
+        <div class="lg:col-span-2 flex flex-col gap-4">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                <div class="text-xs font-bold uppercase tracking-wide c-l3 mb-1">Level 3 · log-volatility &nbsp;<span class="font-mono">x₃</span></div>
+                <div class="text-sm text-slate-600">How <em>changeable</em> the world is believed to be. A slow Gaussian random walk; its current value scales how fast Level&nbsp;2 is allowed to move.</div>
+                <div class="mt-2 grid grid-cols-2 gap-2 text-sm font-mono">
+                    <div>μ₃ = <span id="v-mu3" class="font-bold c-l3">0.00</span></div>
+                    <div>π₃ = <span id="v-pi3" class="font-bold c-l3">1.00</span></div>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                <div class="text-xs font-bold uppercase tracking-wide c-l2 mb-1">Level 2 · tendency &nbsp;<span class="font-mono">x₂</span></div>
+                <div class="text-sm text-slate-600">The reward tendency in log-odds. Its step-size variance is <span class="font-mono">exp(κ·μ₃ + ω₂)</span> — set by Level&nbsp;3. The squashed mean is the belief.</div>
+                <div class="mt-2 grid grid-cols-2 gap-2 text-sm font-mono">
+                    <div>μ₂ = <span id="v-mu2" class="font-bold c-l2">0.00</span></div>
+                    <div>1/π₂ = <span id="v-lr" class="font-bold" style="color:#f59e0b">—</span></div>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                <div class="text-xs font-bold uppercase tracking-wide c-l1 mb-1">Level 1 · outcome &nbsp;<span class="font-mono">x₁ , u</span></div>
+                <div class="text-sm text-slate-600">The belief about <em>this</em> trial: <span class="font-mono">p̂ = σ(μ₂)</span>, the probability the gamble pays. The observed reward <span class="font-mono">u∈{0,1}</span> drives the error.</div>
+                <div class="mt-2 grid grid-cols-3 gap-2 text-sm font-mono">
+                    <div>p̂ = <span id="v-phat" class="font-bold c-l1">0.50</span></div>
+                    <div>u = <span id="v-u" class="font-bold text-slate-700">—</span></div>
+                    <div>δ₁ = <span id="v-pe" class="font-bold c-pe">—</span></div>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Parameters <span class="font-normal normal-case">(ω₂ is the only one the project fits)</span></div>
+                <label class="text-xs font-semibold text-slate-600 flex justify-between">ω₂ tonic volatility (L2) <span id="lab-o2" class="font-mono c-l2">−3.0</span></label>
+                <input id="p-o2" type="range" min="-8" max="0" step=".25" value="-3" class="w-full accent-indigo-600 mb-2">
+                <label class="text-xs font-semibold text-slate-600 flex justify-between">ω₃ tonic volatility (L3) <span id="lab-o3" class="font-mono c-l3">−4.0</span></label>
+                <input id="p-o3" type="range" min="-8" max="-1" step=".25" value="-4" class="w-full accent-violet-600 mb-2">
+                <label class="text-xs font-semibold text-slate-600 flex justify-between">κ volatility coupling (L2↔L3) <span id="lab-k" class="font-mono c-l3">1.0</span></label>
+                <input id="p-k" type="range" min="0" max="2" step=".1" value="1" class="w-full accent-violet-600">
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================ EQUATIONS ============================ -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="eqbox p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-800 mb-1">① Generative model <span class="text-sm font-normal text-slate-400">— top-down</span></h2>
+            <p class="text-sm text-slate-500 mb-3">How the world is assumed to produce outcomes. Each layer is a Gaussian random walk whose <em>variance</em> is set by the layer above.</p>
+            <div class="space-y-2 text-[15px] leading-relaxed">
+                $$x_3^{(k)} \sim \mathcal N\!\big(x_3^{(k-1)},\; \vartheta\big),\qquad \vartheta=\exp(\omega_3)$$
+                <p class="text-xs text-slate-400">Level 3 drifts on its own clock (meta-volatility ω₃).</p>
+                $$x_2^{(k)} \sim \mathcal N\!\big(x_2^{(k-1)},\; \exp(\kappa\,x_3^{(k)}+\omega_2)\big)$$
+                <p class="text-xs text-slate-400">★ The coupling: Level 3 sets how far Level 2 may move per trial.</p>
+                $$x_1^{(k)} \sim \text{Bernoulli}\big(\sigma(x_2^{(k)})\big),\qquad u^{(k)}=x_1^{(k)}$$
+                <p class="text-xs text-slate-400">Level 2's squashed value is the reward probability; the outcome is a coin flip.</p>
+            </div>
+        </div>
+
+        <div class="eqbox p-5 shadow-sm">
+            <h2 class="text-lg font-semibold text-slate-800 mb-1">② Inversion / belief update <span class="text-sm font-normal c-pe">— bottom-up</span></h2>
+            <p class="text-sm text-slate-500 mb-3">On each trial: predict, measure the surprise, then update each layer by a <strong>precision-weighted prediction error</strong>.</p>
+            <div class="space-y-1 text-[15px] leading-relaxed">
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-1">Predict</p>
+                $$\hat\mu_2=\mu_2,\quad \hat p=\sigma(\hat\mu_2),\quad \nu_2=\exp(\kappa\,\mu_3+\omega_2)$$
+                $$\hat\pi_2=\big(\tfrac1{\pi_2}+\nu_2\big)^{-1}$$
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-2">Update Level 2 (tendency)</p>
+                $$\color{#e11d48}{\delta_1}=u-\hat p,\qquad \pi_2=\hat\pi_2+\hat p(1-\hat p)$$
+                $$\mu_2=\hat\mu_2+\underbrace{\tfrac{1}{\pi_2}}_{\text{learning rate}}\,\color{#e11d48}{\delta_1}$$
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-2">Update Level 3 (volatility)</p>
+                $$w_2=\nu_2\,\hat\pi_2,\qquad \color{#e11d48}{\delta_2}=\big(\tfrac1{\pi_2}+(\mu_2-\hat\mu_2)^2\big)\hat\pi_2-1$$
+                $$\pi_3=\hat\pi_3+\tfrac12\kappa^2 w_2\big(w_2+(2w_2-1)\color{#e11d48}{\delta_2}\big)$$
+                $$\mu_3=\hat\mu_3+\tfrac12\,\tfrac{\kappa\,w_2}{\pi_3}\,\color{#e11d48}{\delta_2}$$
+            </div>
+        </div>
+    </div>
+
+    <p class="text-sm text-slate-600 mb-6 -mt-2 bg-amber-50 border border-amber-100 rounded-lg p-3">
+        <strong>The whole idea in one sentence:</strong> the learning rate at Level&nbsp;2 is <span class="font-mono">1/π₂</span>, and it grows
+        with the believed volatility <span class="font-mono">μ₃</span> at Level&nbsp;3 — so when the world looks unstable, beliefs update faster.
+        That feedback from L3 → learning-rate → L2 is what makes the filter <em>hierarchical</em>.
+    </p>
+
+    <!-- ============================ TRAJECTORIES ============================ -->
+    <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+        <h2 class="text-lg font-semibold text-slate-800 mb-1">All three layers over the task</h2>
+        <p class="text-sm text-slate-500 mb-4">The same run as the diagram. Notice how a burst of prediction errors (a world-change) pushes
+        <span class="c-l3 font-semibold">μ₃</span> up, which raises the <span style="color:#f59e0b" class="font-semibold">learning rate</span>, which lets
+        <span class="c-l2 font-semibold">p̂</span> catch the new truth faster.</p>
+
+        <h3 class="text-sm font-semibold text-slate-700 mb-2">Outcomes <span class="font-normal text-slate-400">— <span class="text-emerald-600">▮</span> reward · <span class="text-slate-400">▮</span> none</span></h3>
+        <canvas id="raster" class="raster-canvas mb-4"></canvas>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div>
+                <h3 class="text-sm font-semibold c-l1 mb-1">Level 1 — belief p̂ = σ(μ₂) vs. true world</h3>
+                <div class="relative h-56"><canvas id="ch-l1"></canvas></div>
+            </div>
+            <div>
+                <h3 class="text-sm font-semibold c-l2 mb-1">Level 2 — μ₂ &amp; learning rate 1/π₂</h3>
+                <div class="relative h-56"><canvas id="ch-l2"></canvas></div>
+            </div>
+            <div>
+                <h3 class="text-sm font-semibold c-l3 mb-1">Level 3 — volatility μ₃</h3>
+                <div class="relative h-56"><canvas id="ch-l3"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <p class="text-xs text-slate-400 mt-4">Self-contained HTML — open in any browser. HGF update math is faithful to
+    <span class="font-mono">runHGF()</span> in <span class="font-mono">hgf_mathematical_visualizer.html</span> /
+    <span class="font-mono">analysis/hgf/model.py</span>. Equations rendered with MathJax.</p>
+</div>
+
+<script>
+// =====================================================================
+//  HGF — 3-level binary update (faithful to analysis/hgf/model.py)
+// =====================================================================
+const sigmoid = x => 1 / (1 + Math.exp(-x));
+const logit   = p => Math.log(p / (1 - p));
+
+// Deterministic PRNG so the "world" is reproducible.
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+// A switching reward world (same style as the existing visualizer).
+const LEVELS = [0.15, 0.85, 0.4, 0.8, 0.2];
+function buildTask(seedVal){
+    const rnd = mulberry32(seedVal), n = 90, nBlocks = 5;
+    const schedule = new Array(n);
+    for (let b=0;b<nBlocks;b++){
+        const lvl = LEVELS[b % LEVELS.length];
+        for (let t=Math.round(b*n/nBlocks); t<Math.round((b+1)*n/nBlocks); t++) schedule[t]=lvl;
+    }
+    const outcomes = schedule.map(p => rnd() < p ? 1 : 0);
+    return { schedule, outcomes, n };
+}
+
+// One online HGF step. Returns the per-step internals + carries state forward.
+function hgfStep(state, u, P){
+    const mu2hat = state.mu2, mu3hat = state.mu3;
+    const phat   = sigmoid(mu2hat);
+    const nu2    = Math.exp(P.kappa*mu3hat + P.omega2);
+    const sa2hat = state.sa2 + nu2;
+    const pihat2 = 1/sa2hat;
+    const nu3    = Math.exp(P.omega3);
+    const sa3hat = state.sa3 + nu3;
+    const pihat3 = 1/sa3hat;
+
+    // Level 2 update
+    const da1 = u - phat;                       // δ₁ prediction error
+    const pi2 = pihat2 + phat*(1-phat);
+    const sa2 = 1/pi2;                           // learning rate = 1/π₂
+    const mu2 = mu2hat + sa2*da1;
+
+    // Level 3 (volatility) update
+    const da2 = (sa2 + (mu2-mu2hat)**2)*pihat2 - 1;   // δ₂
+    const w2  = nu2*pihat2;
+    let   pi3 = pihat3 + 0.5*P.kappa*P.kappa*w2*(w2 + (2*w2-1)*da2);
+    if (pi3 < 1e-6) pi3 = 1e-6;
+    const sa3 = 1/pi3;
+    const mu3 = mu3hat + 0.5*sa3*P.kappa*w2*da2;
+
+    Object.assign(state, { mu2, sa2, mu3, sa3 });
+    return { phat, da1, da2, lr: sa2, mu2, mu3, pi2, pi3, u };
+}
+
+function freshState(){ return { mu2: 0, sa2: 1, mu3: 0, sa3: 1 }; }
+function readParams(){
+    return {
+        omega2: parseFloat(document.getElementById('p-o2').value),
+        omega3: parseFloat(document.getElementById('p-o3').value),
+        kappa:  parseFloat(document.getElementById('p-k').value)
+    };
+}
+
+// Run the whole task (for the trajectory charts).
+function runFull(task, P){
+    const st = freshState();
+    const o = { phat:[], lr:[], mu2:[], mu3:[], pe:[] };
+    for (let k=0;k<task.n;k++){
+        const r = hgfStep(st, task.outcomes[k], P);
+        o.phat.push(r.phat); o.lr.push(r.lr); o.mu2.push(r.mu2); o.mu3.push(r.mu3); o.pe.push(r.da1);
+    }
+    return o;
+}
+
+// =====================================================================
+//  SVG DIAGRAM  — three Gaussian nodes + two arrow systems
+// =====================================================================
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent){ const e=document.createElementNS(SVG_NS,tag); for(const k in attrs) e.setAttribute(k,attrs[k]); if(parent)parent.appendChild(e); return e; }
+
+function nodeBox(svg, x, y, w, h, fill, stroke){
+    const g = el('g', {}, svg);
+    el('rect', {x, y, width:w, height:h, rx:14, fill, stroke, 'stroke-width':2, class:'node-card'}, g);
+    return g;
+}
+
+function buildDiagram(){
+    const svg = document.getElementById('diagram');
+    svg.innerHTML = '';
+    // arrowhead markers
+    const defs = el('defs', {}, svg);
+    [['ah-gen','#6366f1'],['ah-upd','#e11d48']].forEach(([id,col])=>{
+        const m = el('marker',{id,markerWidth:9,markerHeight:9,refX:7,refY:3,orient:'auto',markerUnits:'strokeWidth'},defs);
+        el('path',{d:'M0,0 L7,3 L0,6 Z',fill:col},m);
+    });
+
+    const cx = 280, w = 240, h = 92;
+    const y3 = 30, y2 = 220, y1 = 410;        // node top-ys
+    // --- nodes ---
+    nodeBox(svg, cx-w/2, y3, w, h, '#f5f3ff', '#7c3aed').id='node-3';
+    nodeBox(svg, cx-w/2, y2, w, h, '#eef2ff', '#4f46e5').id='node-2';
+    nodeBox(svg, cx-w/2, y1, w, h, '#f0fdfa', '#0d9488').id='node-1';
+
+    // node labels
+    function lab(x,y,lines,col){ lines.forEach((t,i)=>el('text',{x,y:y+i*19,'text-anchor':'middle','font-size':i?13:15,'font-weight':i?400:700,fill:col,'font-family':'Inter'},svg)).forEach(()=>{}); }
+    const txt = (x,y,s,size,weight,col,id)=>{const t=el('text',{x,y,'text-anchor':'middle','font-size':size,'font-weight':weight,fill:col,'font-family':size>13?'Inter':'monospace'},svg);t.textContent=s;if(id)t.id=id;return t;};
+
+    txt(cx, y3+26, 'Level 3 — log-volatility  x₃', 14, 700, '#7c3aed');
+    txt(cx, y3+52, 'μ₃ = 0.00', 16, 700, '#7c3aed', 'd-mu3');
+    txt(cx, y3+74, '“how changeable is the world?”', 11.5, 400, '#8b7bbf');
+
+    txt(cx, y2+26, 'Level 2 — tendency  x₂', 14, 700, '#4f46e5');
+    txt(cx, y2+52, 'μ₂ = 0.00', 16, 700, '#4f46e5', 'd-mu2');
+    txt(cx, y2+74, 'variance = exp(κ·μ₃ + ω₂)', 11.5, 400, '#7c83e0');
+
+    txt(cx, y1+26, 'Level 1 — outcome  x₁ , u', 14, 700, '#0d9488');
+    txt(cx, y1+52, 'p̂ = σ(μ₂) = 0.50', 16, 700, '#0d9488', 'd-phat');
+    txt(cx, y1+74, 'reward u ∈ {0,1}', 11.5, 400, '#3aa99c');
+
+    // --- arrows: generative (down, left side) ---
+    const lx = cx - w/2 - 38, rx = cx + w/2 + 38;
+    // down arrows on the LEFT
+    el('path',{d:`M ${lx} ${y3+h} C ${lx-30} ${y3+h+40}, ${lx-30} ${y2-40}, ${lx} ${y2}`,fill:'none','marker-end':'url(#ah-gen)',class:'arrow flow-gen','stroke-width':2.5,id:'arr-gen-32'},svg);
+    el('path',{d:`M ${lx} ${y2+h} C ${lx-30} ${y2+h+40}, ${lx-30} ${y1-40}, ${lx} ${y1}`,fill:'none','marker-end':'url(#ah-gen)',class:'arrow flow-gen','stroke-width':2.5,id:'arr-gen-21'},svg);
+    txt(lx-52, (y3+h+y2)/2+4, 'sets', 12, 600, '#6366f1');
+    txt(lx-52, (y3+h+y2)/2+19, 'volatility', 11, 400, '#6366f1');
+    txt(lx-52, (y2+h+y1)/2+4, 'sets', 12, 600, '#6366f1');
+    txt(lx-52, (y2+h+y1)/2+19, 'P(reward)', 11, 400, '#6366f1');
+
+    // --- arrows: update (up, RIGHT side) ---
+    el('path',{d:`M ${rx} ${y1} C ${rx+30} ${y1-40}, ${rx+30} ${y2+h+40}, ${rx} ${y2+h}`,fill:'none','marker-end':'url(#ah-upd)',class:'arrow flow-upd','stroke-width':2.5,id:'arr-upd-12'},svg);
+    el('path',{d:`M ${rx} ${y2} C ${rx+30} ${y2-40}, ${rx+30} ${y3+h+40}, ${rx} ${y3+h}`,fill:'none','marker-end':'url(#ah-upd)',class:'arrow flow-upd','stroke-width':2.5,id:'arr-upd-23'},svg);
+    txt(rx+50, (y2+h+y1)/2+4, 'δ₁ error', 12, 600, '#e11d48');
+    txt(rx+50, (y2+h+y1)/2+19, '→ μ₂', 11, 400, '#e11d48');
+    txt(rx+50, (y3+h+y2)/2+4, 'δ₂ error', 12, 600, '#e11d48');
+    txt(rx+50, (y3+h+y2)/2+19, '→ μ₃', 11, 400, '#e11d48');
+
+    // input u badge under level 1
+    const ub = el('g',{},svg);
+    el('rect',{x:cx-26,y:y1+h+16,width:52,height:30,rx:8,fill:'#fff',stroke:'#94a3b8','stroke-width':1.5},ub);
+    txt(cx, y1+h+36, 'u = —', 14, 700, '#475569','d-u');
+    el('path',{d:`M ${cx} ${y1+h+16} L ${cx} ${y1+h}`,fill:'none','marker-end':'url(#ah-upd)',stroke:'#94a3b8','stroke-width':2},svg);
+}
+
+function highlightArrows(which){ // 'gen' | 'upd' | 'none'
+    ['arr-gen-32','arr-gen-21'].forEach(id=>document.getElementById(id).classList.toggle('hot', which==='gen'));
+    ['arr-upd-12','arr-upd-23'].forEach(id=>document.getElementById(id).classList.toggle('hot', which==='upd'));
+}
+
+// =====================================================================
+//  TRAJECTORY CHARTS
+// =====================================================================
+Chart.defaults.font.family = "'Inter', sans-serif";
+Chart.defaults.elements.point.radius = 0;
+Chart.defaults.elements.line.tension = 0.2;
+Chart.defaults.animation = false;
+const charts = {};
+
+function initCharts(){
+    charts.l1 = new Chart(document.getElementById('ch-l1'), {
+        type:'line', data:{labels:[],datasets:[]},
+        options:{responsive:true,maintainAspectRatio:false,
+            scales:{x:{title:{display:true,text:'Trial'},ticks:{maxTicksLimit:8}},y:{min:0,max:1}},
+            plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:8,font:{size:10}}}}}
+    });
+    charts.l2 = new Chart(document.getElementById('ch-l2'), {
+        type:'line', data:{labels:[],datasets:[]},
+        options:{responsive:true,maintainAspectRatio:false,
+            scales:{x:{title:{display:true,text:'Trial'},ticks:{maxTicksLimit:8}},
+                    y:{position:'left',title:{display:true,text:'μ₂'}},
+                    y2:{position:'right',title:{display:true,text:'1/π₂'},grid:{drawOnChartArea:false},beginAtZero:true}},
+            plugins:{legend:{position:'top',labels:{usePointStyle:true,boxWidth:8,font:{size:10}}}}}
+    });
+    charts.l3 = new Chart(document.getElementById('ch-l3'), {
+        type:'line', data:{labels:[],datasets:[]},
+        options:{responsive:true,maintainAspectRatio:false,
+            scales:{x:{title:{display:true,text:'Trial'},ticks:{maxTicksLimit:8}},y:{title:{display:true,text:'μ₃'}}},
+            plugins:{legend:{display:false}}}
+    });
+}
+
+function drawRaster(){
+    const c=document.getElementById('raster'),ctx=c.getContext('2d'),dpr=window.devicePixelRatio||1;
+    const rect=c.getBoundingClientRect(); if(!rect.width)return;
+    c.width=rect.width*dpr;c.height=rect.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+    const w=rect.width,h=rect.height,mid=h/2; ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle='#e5e7eb';ctx.beginPath();ctx.moveTo(0,mid);ctx.lineTo(w,mid);ctx.stroke();
+    const {outcomes,n}=task,colW=w/n,tick=Math.min(h*0.4,mid-3);
+    for(let i=0;i<n;i++){const x=(i+0.5)*colW;ctx.lineWidth=Math.max(1,Math.min(3,colW*0.5));ctx.beginPath();
+        if(outcomes[i]===1){ctx.strokeStyle='#10b981';ctx.moveTo(x,mid);ctx.lineTo(x,mid-tick);}
+        else{ctx.strokeStyle='#94a3b8';ctx.moveTo(x,mid);ctx.lineTo(x,mid+tick);}
+        ctx.stroke();}
+}
+
+function refreshCharts(){
+    const P=readParams(), r=runFull(task,P), L=Array.from({length:task.n},(_,i)=>i+1);
+    drawRaster();
+    charts.l1.data.labels=L;
+    charts.l1.data.datasets=[
+        {label:'True P(reward)',data:task.schedule,borderColor:'#9ca3af',borderDash:[6,4],stepped:true,borderWidth:1.5},
+        {label:'Belief p̂',data:r.phat,borderColor:'#0d9488',borderWidth:2.5}
+    ];charts.l1.update();
+    charts.l2.data.labels=L;
+    charts.l2.data.datasets=[
+        {label:'μ₂',data:r.mu2,borderColor:'#4f46e5',borderWidth:2.5,yAxisID:'y'},
+        {label:'1/π₂ (learning rate)',data:r.lr,borderColor:'#f59e0b',borderWidth:2,yAxisID:'y2'}
+    ];charts.l2.update();
+    charts.l3.data.labels=L;
+    charts.l3.data.datasets=[
+        {label:'μ₃',data:r.mu3,borderColor:'#7c3aed',borderWidth:2.5,fill:true,backgroundColor:'rgba(124,58,237,.08)'}
+    ];charts.l3.update();
+}
+
+// =====================================================================
+//  TRIAL-BY-TRIAL ANIMATION (drives the diagram numbers)
+// =====================================================================
+let task, animState, k=0, playing=false, timer=null;
+
+function setDiagNumbers(r){
+    document.getElementById('d-mu3').textContent  = 'μ₃ = '+r.mu3.toFixed(2);
+    document.getElementById('d-mu2').textContent  = 'μ₂ = '+r.mu2.toFixed(2);
+    document.getElementById('d-phat').textContent = 'p̂ = σ(μ₂) = '+r.phat.toFixed(2);
+    document.getElementById('d-u').textContent    = 'u = '+r.u;
+    document.getElementById('v-mu3').textContent  = r.mu3.toFixed(2);
+    document.getElementById('v-pi3').textContent  = r.pi3.toFixed(2);
+    document.getElementById('v-mu2').textContent  = r.mu2.toFixed(2);
+    document.getElementById('v-lr').textContent   = r.lr.toFixed(3);
+    document.getElementById('v-phat').textContent = r.phat.toFixed(2);
+    document.getElementById('v-u').textContent    = r.u;
+    document.getElementById('v-pe').textContent   = (r.da1>=0?'+':'')+r.da1.toFixed(2);
+    document.getElementById('v-pe').style.color   = r.da1>=0 ? '#059669' : '#e11d48';
+    document.getElementById('trial-k').textContent= k;
+}
+
+function doStep(forcedU){
+    if (k >= task.n) { stopPlay(); return; }
+    const P = readParams();
+    const u = forcedU !== undefined ? forcedU : task.outcomes[k];
+    // show prediction flowing DOWN, then error UP
+    highlightArrows('gen');
+    const r = hgfStep(animState, u, P);
+    k++;
+    setDiagNumbers(r);
+    setTimeout(()=>highlightArrows('upd'), 230);
+    setTimeout(()=>highlightArrows('none'), 620);
+}
+
+function restart(){
+    stopPlay(); k=0; animState=freshState();
+    highlightArrows('none');
+    document.getElementById('d-mu3').textContent='μ₃ = 0.00';
+    document.getElementById('d-mu2').textContent='μ₂ = 0.00';
+    document.getElementById('d-phat').textContent='p̂ = σ(μ₂) = 0.50';
+    document.getElementById('d-u').textContent='u = —';
+    ['v-mu3','v-mu2','v-phat'].forEach(()=>{});
+    document.getElementById('v-mu3').textContent='0.00';document.getElementById('v-pi3').textContent='1.00';
+    document.getElementById('v-mu2').textContent='0.00';document.getElementById('v-lr').textContent='—';
+    document.getElementById('v-phat').textContent='0.50';document.getElementById('v-u').textContent='—';
+    document.getElementById('v-pe').textContent='—';document.getElementById('v-pe').style.color='#e11d48';
+    document.getElementById('trial-k').textContent='0';
+}
+function startPlay(){ if(playing)return; if(k>=task.n)restart(); playing=true; document.getElementById('btn-play').textContent='⏸ Pause'; timer=setInterval(()=>doStep(), 700); }
+function stopPlay(){ playing=false; clearInterval(timer); document.getElementById('btn-play').textContent='▶ Play trial-by-trial'; }
+
+// =====================================================================
+//  WIRING
+// =====================================================================
+window.onload = function(){
+    task = buildTask(7);
+    buildDiagram();
+    initCharts();
+    refreshCharts();
+    restart();
+
+    document.getElementById('btn-play').onclick  = ()=> playing ? stopPlay() : startPlay();
+    document.getElementById('btn-step').onclick  = ()=> { stopPlay(); doStep(); };
+    document.getElementById('btn-rew').onclick   = ()=> { stopPlay(); doStep(1); };
+    document.getElementById('btn-norew').onclick = ()=> { stopPlay(); doStep(0); };
+    document.getElementById('btn-restart').onclick = restart;
+
+    ['p-o2','p-o3','p-k'].forEach(id=>{
+        document.getElementById(id).addEventListener('input', ()=>{
+            document.getElementById('lab-o2').textContent = parseFloat(document.getElementById('p-o2').value).toFixed(1).replace('-','−');
+            document.getElementById('lab-o3').textContent = parseFloat(document.getElementById('p-o3').value).toFixed(1).replace('-','−');
+            document.getElementById('lab-k').textContent  = parseFloat(document.getElementById('p-k').value).toFixed(1);
+            refreshCharts();   // params changed → recompute trajectories; restart the walkthrough
+            restart();
+        });
+    });
+
+    window.addEventListener('resize', refreshCharts);
+};
+</script>
+</body>
+</html>
