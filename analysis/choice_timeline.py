@@ -11,18 +11,27 @@ Two modes share one RW + softmax engine (see run_rw_model):
 
 Layout (top → bottom)
 ---------------------
-  [Participant]
-    Gamble row : orange ticks — bright = rewarded, muted = unrewarded
-    Safe   row : green  ticks — bright = rewarded, muted = unrewarded
+  shadow mode
+    [Participant]
+      Gamble row : orange ticks — bright = rewarded, muted = unrewarded
+      Safe   row : green  ticks — bright = rewarded, muted = unrewarded
+    [RW model — prediction row]
+      Correct : black ticks  (model prediction == participant choice)
+      Wrong   : gray  ticks
+    [P(Gamble)]
+      The model's trial-by-trial P(Gamble) trace (orange fill above .5, green below)
+    [Alignment]
+      Rolling match-rate line (model prediction == participant choice)
+      Fill: blue above chance, red below chance
 
-  [RW Model  (α, β, φ) — shadow | simulate]
-    Gamble row : same colour scheme, drawn from the model's predicted/own choice
-    Safe   row :   "
-    P(Gamble)  : thin black line overlaid on the model gamble row
-
-  [Alignment]
-    Rolling match-rate line (model choice == participant choice)
-    Fill: blue above chance, red below chance
+  simulate mode
+    [Participant]
+      Gamble row / Safe row  (same colour scheme)
+    [RW Model  (α, β, φ)]
+      Gamble row / Safe row  drawn from the model's own choices & sampled rewards
+      P(Gamble) overlaid on model Gamble row
+    [Alignment]
+      Rolling match-rate line
 
 Usage
 -----
@@ -236,13 +245,27 @@ def plot_choice_timeline(
     window: int = 20,
     mode: str = "shadow",
     rng: np.random.Generator | None = None,
+    n_trials: int | None = None,
 ):
-    """Build and return the 5-row figure (shadow or simulate mode)."""
+    """Build and return the figure.
+
+    shadow mode   — 4 rows: [RW Prediction] [Participant Gamble] [Participant Safe] [Alignment]
+      The prediction row shows per-trial correct (coloured by arm) / wrong (gray) ticks
+      with P(Gamble) overlaid.  The model is an observer here; duplicating its predicted
+      arm rows would confuse reward colouring (model_rewards is the participant's reward).
+
+    simulate mode — 5 rows: [Participant Gamble] [Participant Safe]
+                             [Model Gamble]       [Model Safe]       [Alignment]
+      The model free-runs with its own choices and rewards, so arm-by-arm rows make sense.
+    """
     trials     = sess.trials
     responding = sess.responding_mask
+    if n_trials is not None:
+        trials     = trials.iloc[:n_trials]
+        responding = responding[:n_trials]
+    n_trials   = len(trials)
     arm        = trials["ChosenArm_G1S0"].to_numpy()
     rew        = trials["Rewarded"].to_numpy()
-    n_trials   = len(trials)
     idx        = np.arange(n_trials)
     is_sim     = (mode == "simulate")
 
@@ -254,42 +277,17 @@ def plot_choice_timeline(
     overall_acc = float(np.nanmean(match_arr))
 
     # ---- Colours ------------------------------------------------------
-    col_gr = CONDITIONS["G+R"]["color"]         # darkorange (gamble rewarded)
-    col_gn = desaturate(col_gr, factor=0.28)    # muted orange  (gamble unrewarded)
-    col_sr = CONDITIONS["S+R"]["color"]         # seagreen      (safe rewarded)
-    col_sn = desaturate(col_sr, factor=0.28)    # muted green   (safe unrewarded)
+    col_gr    = CONDITIONS["G+R"]["color"]       # darkorange
+    col_gn    = desaturate(col_gr, factor=0.28)  # muted orange
+    col_sr    = CONDITIONS["S+R"]["color"]       # seagreen
+    col_sn    = desaturate(col_sr, factor=0.28)  # muted green
+    col_wrong = "#c0c0c0"                        # gray — wrong predictions (shadow only)
 
     # ---- Participant masks --------------------------------------------
     p_gr = responding & (arm == 1) & (rew == 1)
     p_gn = responding & (arm == 1) & (rew == 0)
     p_sr = responding & (arm == 0) & (rew == 1)
     p_sn = responding & (arm == 0) & (rew == 0)
-
-    # ---- Model masks (model's choice × its row's outcome) ------------
-    # In shadow mode model_rewards is the participant's reward; in simulate
-    # mode it is the model's own sampled reward.
-    model_resp = ~np.isnan(model_choice)
-    m_gr = model_resp & (model_choice == 1) & (model_rewards == 1)
-    m_gn = model_resp & (model_choice == 1) & (model_rewards == 0)
-    m_sr = model_resp & (model_choice == 0) & (model_rewards == 1)
-    m_sn = model_resp & (model_choice == 0) & (model_rewards == 0)
-
-    # ---- Figure layout ------------------------------------------------
-    fig = plt.figure(figsize=(15, 8))
-    gs  = gridspec.GridSpec(
-        5, 1,
-        figure=fig,
-        height_ratios=[1, 1, 1, 1, 2.5],
-        hspace=0.08,
-    )
-    ax_pg = fig.add_subplot(gs[0])   # Participant – Gamble
-    ax_ps = fig.add_subplot(gs[1])   # Participant – Safe
-    ax_mg = fig.add_subplot(gs[2])   # Model – Gamble
-    ax_ms = fig.add_subplot(gs[3])   # Model – Safe
-    ax_al = fig.add_subplot(gs[4])   # Alignment
-
-    for ax in (ax_ps, ax_mg, ax_ms, ax_al):
-        ax.sharex(ax_pg)
 
     # ---- Tick-row drawing helper -------------------------------------
     def tick_row(ax, rows, ylabel):
@@ -310,60 +308,141 @@ def plot_choice_timeline(
         ax.legend(loc="upper right", fontsize=BASE_FONT + 0.5, framealpha=0.8,
                   handlelength=1.0, ncol=2, borderpad=0.4)
 
-    # ---- Section background bands -------------------------------------
-    for ax in (ax_pg, ax_ps):
-        ax.set_facecolor("#fafafa")
-    for ax in (ax_mg, ax_ms):
-        ax.set_facecolor("#f0f4ff")
+    # ---- P(Gamble) overlay helper ------------------------------------
+    def overlay_pgamble(ax):
+        ax_r = ax.twinx()
+        ax_r.plot(idx, p_gamble, color="black", lw=0.9, alpha=0.35, label="P(Gamble)")
+        ax_r.axhline(0.5, color="black", lw=0.5, ls="--", alpha=0.2)
+        ax_r.set_ylim(0, 1)
+        ax_r.set_yticks([0, 0.5, 1])
+        ax_r.set_yticklabels(["0", ".5", "1"], fontsize=BASE_FONT)
+        ax_r.set_ylabel("P(G)", fontsize=BASE_FONT + 1, labelpad=2)
+        ax_r.spines[["top", "left"]].set_visible(False)
 
-    # ---- Draw participant rows ----------------------------------------
-    tick_row(ax_pg, [
-        (idx[p_gr], col_gr, f"Rewarded  (n={p_gr.sum()})"),
-        (idx[p_gn], col_gn, f"Unrewarded (n={p_gn.sum()})"),
-    ], ylabel="Gamble")
+    # ---- Dedicated P(Gamble) row -------------------------------------
+    def pgamble_row(ax, ylabel="P(Gamble)"):
+        ax.axhline(0.5, color="gray", lw=0.7, ls="--", alpha=0.5)
+        ax.plot(idx, p_gamble, color="black", lw=1.3, zorder=3)
+        ax.fill_between(idx, 0.5, p_gamble, where=(p_gamble >= 0.5),
+                        interpolate=True, color=col_gr, alpha=0.18, zorder=1)
+        ax.fill_between(idx, p_gamble, 0.5, where=(p_gamble < 0.5),
+                        interpolate=True, color=col_sr, alpha=0.18, zorder=1)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0, 0.5, 1])
+        ax.set_yticklabels(["0", ".5", "1"], fontsize=BASE_FONT)
+        ax.set_ylabel(ylabel, fontsize=BASE_FONT + 3, labelpad=6,
+                      rotation=0, ha="right", va="center")
+        ax.spines[["top", "right"]].set_visible(False)
 
-    p_safe_rows = [(idx[p_sr], col_sr, f"Rewarded  (n={p_sr.sum()})")]
-    if p_sn.sum():
-        p_safe_rows.append((idx[p_sn], col_sn, f"Unrewarded (n={p_sn.sum()})"))
-    tick_row(ax_ps, p_safe_rows, ylabel="Safe")
+    # ---- Figure layout ------------------------------------------------
+    fig = plt.figure(figsize=(15, 8))
 
-    # ---- Draw model rows ---------------------------------------------
-    verb = "Chose" if is_sim else "Predicts"
-    tick_row(ax_mg, [
-        (idx[m_gr], col_gr, f"{verb} G, rewarded  (n={m_gr.sum()})"),
-        (idx[m_gn], col_gn, f"{verb} G, unrewarded (n={m_gn.sum()})"),
-    ], ylabel="Gamble")
+    if is_sim:
+        # 5-row layout
+        gs    = gridspec.GridSpec(5, 1, figure=fig,
+                                  height_ratios=[1, 1, 1, 1, 2.5], hspace=0.08)
+        ax_pg = fig.add_subplot(gs[0])
+        ax_ps = fig.add_subplot(gs[1], sharex=ax_pg)
+        ax_mg = fig.add_subplot(gs[2], sharex=ax_pg)
+        ax_ms = fig.add_subplot(gs[3], sharex=ax_pg)
+        ax_al = fig.add_subplot(gs[4], sharex=ax_pg)
+        top_ax = ax_pg
 
-    m_safe_rows = [(idx[m_sr], col_sr, f"{verb} S, rewarded  (n={m_sr.sum()})")]
-    if m_sn.sum():
-        m_safe_rows.append((idx[m_sn], col_sn, f"{verb} S, unrewarded (n={m_sn.sum()})"))
-    tick_row(ax_ms, m_safe_rows, ylabel="Safe")
+        # Backgrounds
+        for ax in (ax_pg, ax_ps):
+            ax.set_facecolor("#fafafa")
+        for ax in (ax_mg, ax_ms):
+            ax.set_facecolor("#f0f4ff")
 
-    # Overlay P(Gamble) line on model gamble row
-    ax_mg_r = ax_mg.twinx()
-    ax_mg_r.plot(idx, p_gamble, color="black", lw=0.9, alpha=0.35,
-                 label="P(Gamble)")
-    ax_mg_r.axhline(0.5, color="black", lw=0.5, ls="--", alpha=0.2)
-    ax_mg_r.set_ylim(0, 1)
-    ax_mg_r.set_yticks([0, 0.5, 1])
-    ax_mg_r.set_yticklabels(["0", ".5", "1"], fontsize=BASE_FONT)
-    ax_mg_r.set_ylabel("P(G)", fontsize=BASE_FONT + 1, labelpad=2)
-    ax_mg_r.spines[["top", "left"]].set_visible(False)
+        # Participant rows
+        tick_row(ax_pg, [
+            (idx[p_gr], col_gr, f"Rewarded  (n={p_gr.sum()})"),
+            (idx[p_gn], col_gn, f"Unrewarded (n={p_gn.sum()})"),
+        ], ylabel="Gamble")
+        p_safe_rows = [(idx[p_sr], col_sr, f"Rewarded  (n={p_sr.sum()})")]
+        if p_sn.sum():
+            p_safe_rows.append((idx[p_sn], col_sn, f"Unrewarded (n={p_sn.sum()})"))
+        tick_row(ax_ps, p_safe_rows, ylabel="Safe")
 
-    # ---- Section labels (left margin) --------------------------------
-    for ax, label in [
-        (ax_pg, "Participant"),
-        (ax_mg, f"RW model "),
-    ]:
-        ax.text(
-            -0.05, 0, label,
-            transform=ax.transAxes,
-            fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
-            ha="right", va="bottom", linespacing=1.4,
-        )
+        # Model rows (simulate: model_rewards is model's own sampled reward)
+        model_resp = ~np.isnan(model_choice)
+        m_gr = model_resp & (model_choice == 1) & (model_rewards == 1)
+        m_gn = model_resp & (model_choice == 1) & (model_rewards == 0)
+        m_sr = model_resp & (model_choice == 0) & (model_rewards == 1)
+        m_sn = model_resp & (model_choice == 0) & (model_rewards == 0)
+        tick_row(ax_mg, [
+            (idx[m_gr], col_gr, f"Chose G, rewarded  (n={m_gr.sum()})"),
+            (idx[m_gn], col_gn, f"Chose G, unrewarded (n={m_gn.sum()})"),
+        ], ylabel="Gamble")
+        m_safe_rows = [(idx[m_sr], col_sr, f"Chose S, rewarded  (n={m_sr.sum()})")]
+        if m_sn.sum():
+            m_safe_rows.append((idx[m_sn], col_sn, f"Chose S, unrewarded (n={m_sn.sum()})"))
+        tick_row(ax_ms, m_safe_rows, ylabel="Safe")
+
+        overlay_pgamble(ax_mg)
+
+        # Section labels
+        ax_pg.text(-0.05, 0, "Participant", transform=ax_pg.transAxes,
+                   fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
+                   ha="right", va="bottom", linespacing=1.4)
+        ax_mg.text(-0.05, 0, "RW model",   transform=ax_mg.transAxes,
+                   fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
+                   ha="right", va="bottom", linespacing=1.4)
+
+        tick_axes = (ax_pg, ax_ps, ax_mg, ax_ms)
+
+    else:
+        # 5-row layout — shadow: participant first, then the model observer below.
+        #   participant Gamble / Safe → prediction (black=correct, gray=wrong) → P(Gamble)
+        gs    = gridspec.GridSpec(5, 1, figure=fig,
+                                  height_ratios=[1, 1, 1, 1, 2.5], hspace=0.08)
+        ax_pg = fig.add_subplot(gs[0])              # Participant – Gamble
+        ax_ps = fig.add_subplot(gs[1], sharex=ax_pg) # Participant – Safe
+        ax_pr = fig.add_subplot(gs[2], sharex=ax_pg) # Prediction (correct/wrong)
+        ax_pp = fig.add_subplot(gs[3], sharex=ax_pg) # P(Gamble) trace
+        ax_al = fig.add_subplot(gs[4], sharex=ax_pg) # Alignment
+        top_ax = ax_pg
+
+        # Backgrounds
+        for ax in (ax_pg, ax_ps):
+            ax.set_facecolor("#fafafa")
+        for ax in (ax_pr, ax_pp):
+            ax.set_facecolor("#f0f4ff")
+
+        # Participant rows
+        tick_row(ax_pg, [
+            (idx[p_gr], col_gr, f"Rewarded  (n={p_gr.sum()})"),
+            (idx[p_gn], col_gn, f"Unrewarded (n={p_gn.sum()})"),
+        ], ylabel="Gamble")
+        p_safe_rows = [(idx[p_sr], col_sr, f"Rewarded  (n={p_sr.sum()})")]
+        if p_sn.sum():
+            p_safe_rows.append((idx[p_sn], col_sn, f"Unrewarded (n={p_sn.sum()})"))
+        tick_row(ax_ps, p_safe_rows, ylabel="Safe")
+
+        # Prediction row: black = correct, gray = wrong
+        model_resp  = ~np.isnan(model_choice)
+        pred_correct = model_resp & (model_choice == arm)
+        pred_wrong   = model_resp & (model_choice != arm)
+        tick_row(ax_pr, [
+            (idx[pred_correct], "black",     f"Correct (n={pred_correct.sum()})"),
+            (idx[pred_wrong],   col_wrong,   f"Wrong   (n={pred_wrong.sum()})"),
+        ], ylabel="Prediction")
+
+        # Dedicated P(Gamble) row
+        pgamble_row(ax_pp, ylabel="P(Gamble)")
+
+        # Section labels
+        ax_pg.text(-0.05, 0, "Participant", transform=ax_pg.transAxes,
+                   fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
+                   ha="right", va="bottom", linespacing=1.4)
+        ax_pr.text(-0.05, 0, "RW model",   transform=ax_pr.transAxes,
+                   fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
+                   ha="right", va="bottom", linespacing=1.4)
+
+        tick_axes = (ax_pg, ax_ps, ax_pr, ax_pp)
 
     # ---- Title --------------------------------------------------------
-    ax_pg.set_title(
+    top_ax.set_title(
         f"Decision sequence ({mode}) — session {sess.id}",
         fontsize=BASE_FONT + 5, pad=8,
     )
@@ -376,19 +455,12 @@ def plot_choice_timeline(
     acc_word = "match" if is_sim else "accuracy"
     ax_al.axhline(overall_acc, color="steelblue", lw=1.1, ls=":",
                   alpha=0.85, label=f"Overall {acc_word}: {overall_acc:.1%}")
-
-    # Fill: above chance = blue, below = red
-    ax_al.fill_between(
-        idx, 0.5, roll_rate,
-        where=(roll_rate >= 0.5), interpolate=True,
-        color="steelblue", alpha=0.15, zorder=1,
-    )
-    ax_al.fill_between(
-        idx, roll_rate, 0.5,
-        where=(roll_rate < 0.5), interpolate=True,
-        color="firebrick", alpha=0.15, zorder=1,
-    )
-
+    ax_al.fill_between(idx, 0.5, roll_rate,
+                       where=(roll_rate >= 0.5), interpolate=True,
+                       color="steelblue", alpha=0.15, zorder=1)
+    ax_al.fill_between(idx, roll_rate, 0.5,
+                       where=(roll_rate < 0.5), interpolate=True,
+                       color="firebrick", alpha=0.15, zorder=1)
     ax_al.set_ylim(0, 1.05)
     ax_al.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax_al.set_yticklabels(["0 %", "25 %", "50 %", "75 %", "100 %"], fontsize=BASE_FONT + 2)
@@ -399,15 +471,12 @@ def plot_choice_timeline(
     ax_al.spines[["top", "right"]].set_visible(False)
     ax_al.legend(loc="upper left", fontsize=BASE_FONT + 1.5, framealpha=0.85,
                  borderpad=0.5)
-    ax_al.text(
-        -0.055, 0.0, "Alignment",
-        transform=ax_al.transAxes,
-        fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
-        ha="right", va="bottom",
-    )
+    ax_al.text(-0.055, 0.0, "Alignment",
+               transform=ax_al.transAxes,
+               fontsize=BASE_FONT + 2, color="dimgray", fontweight="bold",
+               ha="right", va="bottom")
 
-    # Hide x-tick labels on all tick rows
-    for ax in (ax_pg, ax_ps, ax_mg, ax_ms):
+    for ax in tick_axes:
         plt.setp(ax.get_xticklabels(), visible=False)
 
     fig.tight_layout()
@@ -449,13 +518,17 @@ def main():
         "--seed", type=int, default=None, metavar="S",
         help="RNG seed for --mode simulate (reproducibility)",
     )
+    parser.add_argument(
+        "--trials", type=int, default=None, metavar="N",
+        help="Number of trials to display (default: all trials)",
+    )
     args = parser.parse_args()
 
     sess = Session(args.session)
     rng  = np.random.default_rng(args.seed)
     fig  = plot_choice_timeline(
         sess, alpha=args.alpha, beta=args.beta, phi=args.phi,
-        window=args.window, mode=args.mode, rng=rng,
+        window=args.window, mode=args.mode, rng=rng, n_trials=args.trials,
     )
     maybe_save(fig, args, prefix=f"choice_timeline_{args.mode}")
     plt.show()

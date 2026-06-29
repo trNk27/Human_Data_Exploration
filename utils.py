@@ -335,5 +335,5 @@ def maybe_save(fig, args, prefix="plot", subdir=None):
             path = os.path.join(subdir, name)
         else:
             path = name
-    fig.savefig(path, dpi=600, bbox_inches="tight")
+    fig.savefig(path, dpi=1000, bbox_inches="tight")
     print(f"Saved -> {path}")

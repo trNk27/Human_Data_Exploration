@@ -245,17 +245,19 @@ def fig_reward_selectivity(oreg):
     ns = [oreg.loc[oreg.region == r, "n_neurons"].values[0]
           for r in regions_present]
 
+    n_sig = [round(v * n / 100) for v, n in zip(vals, ns)]
     fig, ax = plt.subplots(figsize=(7, 5))
     x = np.arange(len(regions_present))
     bars = ax.bar(x, vals, 0.55, color="firebrick", alpha=0.85)
     ax.set_xticks(x)
-    ax.set_xticklabels(regions_present)
+    ax.set_xticklabels([f"{r}\n(n={int(n)})" for r, n in zip(regions_present, ns)])
     ax.set_ylabel("% neurons reward-selective (FDR q<.05)")
+    ax.set_ylim(0, min(100, max(vals) * 1.18))
     ax.set_title("Reward outcome selectivity by region\n(G+R vs G+N, reward-aligned)")
     ax.spines[["top", "right"]].set_visible(False)
-    for bar, n in zip(bars, ns):
+    for bar, v, ns_i, nt in zip(bars, vals, n_sig, ns):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.4,
-                f"n={n}", ha="center", va="bottom", fontsize=8)
+                f"{v:.1f}%\n{int(ns_i)}/{int(nt)}", ha="center", va="bottom", fontsize=8)
     fig.tight_layout()
     p = os.path.join(OUT, "fig_reward_selectivity_by_region.png")
     fig.savefig(p, dpi=150, bbox_inches="tight"); plt.close(fig)

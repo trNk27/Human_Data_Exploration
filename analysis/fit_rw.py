@@ -184,6 +184,10 @@ def main():
         "--no-plot", action="store_true",
         help="Skip the choice_timeline plot after fitting",
     )
+    parser.add_argument(
+        "--trials", type=int, default=None, metavar="N",
+        help="Number of trials to display in the plot (default: all; fitting always uses all trials)",
+    )
     args = parser.parse_args()
 
     sess = Session(args.session)
@@ -204,6 +208,7 @@ def main():
             alpha=full["alpha"],
             beta=full["beta"],
             phi=full["phi"],
+            n_trials=args.trials,
         )
         maybe_save(fig, args, prefix="fit_rw")
         plt.show()

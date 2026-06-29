@@ -101,32 +101,114 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     return tab
 
 
+_REGION_ORDER = ["MFG", "IFG", "SMG", "AG"]
+
+
 def plot(tab: pd.DataFrame, alpha: float, window: str, total: int, out_path: str):
-    regions = [r for r in tab.index if r != "ALL"]
+    regions = [r for r in _REGION_ORDER if r in tab.index and r != "ALL"]
+    n_region = tab.loc[regions, "n_neurons"].to_numpy()
     x = np.arange(len(regions))
     w = 0.8 / len(SIG_CATS)
 
     fig, ax = plt.subplots(figsize=(max(12, 2.7 * len(regions) + 5), 6))
     for i, cat in enumerate(SIG_CATS):
         color, hatch = _STYLE[cat]
-        vals = tab.loc[regions, cat].to_numpy()
-        bars = ax.bar(x + (i - (len(SIG_CATS) - 1) / 2) * w, vals, w,
+        counts = tab.loc[regions, cat].to_numpy()
+        pcts   = 100 * counts / n_region
+        bars = ax.bar(x + (i - (len(SIG_CATS) - 1) / 2) * w, pcts, w,
                       color=color, hatch=hatch, edgecolor="white", linewidth=0.6)
-        ax.bar_label(bars, labels=[f"{int(v)}\n{100*v/total:.1f}%" for v in vals],
+        ax.bar_label(bars,
+                     labels=[f"{p:.1f}%\n{int(c)}/{int(n)}"
+                             for p, c, n in zip(pcts, counts, n_region)],
                      fontsize=6.5, padding=2, linespacing=0.9)
 
     ax.set_xticks(x)
     ax.set_xticklabels([f"{r}\n(n={int(tab.loc[r, 'n_neurons'])})" for r in regions])
-    ax.set_ylabel("Number of neurons")
-    ax.set_title(f"Neurons with firing rate ~ RW prediction error (p < {alpha})\n"
+    ax.set_ylabel(f"% of neurons in region (p < {alpha})")
+    ax.set_title(f"FR ~ RW prediction error by region & sign  (p < {alpha})\n"
                  f"window: {window}  ·  {total} neurons total  ·  "
-                 f"% labels are of the {total}-neuron total  ·  "
                  f"hatch = negative r / discordant", fontsize=10)
     legend_handles = [Patch(facecolor=_STYLE[c][0], hatch=_STYLE[c][1],
                             edgecolor="white", label=c) for c in SIG_CATS]
     ax.legend(handles=legend_handles, title="significant in", frameon=False,
               ncol=3, loc="upper right", fontsize=8)
-    ax.margins(y=0.18)
+    ax.margins(y=0.25)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"Saved figure -> {out_path}")
+    return fig
+
+
+def plot_simple(tab: pd.DataFrame, alpha: float, window: str, total: int,
+                out_path: str):
+    """Single bar per region: % neurons with ANY significant PE correlation."""
+    regions = [r for r in _REGION_ORDER if r in tab.index and r != "ALL"]
+    if not regions:
+        return None
+    n_any = tab.loc[regions, "any_sig"].to_numpy()
+    n_tot = tab.loc[regions, "n_neurons"].to_numpy()
+    pcts  = 100 * n_any / n_tot
+    x     = np.arange(len(regions))
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    bars = ax.bar(x, pcts, 0.55, color="steelblue", alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{r}\n(n={int(n)})" for r, n in zip(regions, n_tot)])
+    ax.set_ylabel(f"% neurons FR ~ RW prediction error (p < {alpha})")
+    ax.set_ylim(0, min(100, max(pcts) * 1.18))
+    ax.set_title(f"FR ~ RW prediction error by region\n"
+                 f"(window: {window},  {total} neurons total)")
+    ax.spines[["top", "right"]].set_visible(False)
+    for bar, pct, ns, nt in zip(bars, pcts, n_any, n_tot):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                f"{pct:.1f}%\n{int(ns)}/{int(nt)}",
+                ha="center", va="bottom", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"Saved figure -> {out_path}")
+    return fig
+
+
+_BUCKETS = [
+    ("Reward only",    ["reward only (+)", "reward only (-)"],       "darkorange"),
+    ("No-reward only", ["no-reward only (+)", "no-reward only (-)"], "firebrick"),
+    ("Both",           ["both concordant", "both discordant"],       "rebeccapurple"),
+]
+
+
+def plot_unsigned(tab: pd.DataFrame, alpha: float, window: str, total: int,
+                  out_path: str):
+    """3-bucket grouped bar: reward only / no-reward only / both, % of region."""
+    regions = [r for r in _REGION_ORDER if r in tab.index and r != "ALL"]
+    if not regions:
+        return None
+    n_region = tab.loc[regions, "n_neurons"].to_numpy()
+    x = np.arange(len(regions))
+    w = 0.22
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for i, (label, cats, color) in enumerate(_BUCKETS):
+        counts = sum(tab.loc[regions, c].to_numpy() for c in cats)
+        pcts   = 100 * counts / n_region
+        bars   = ax.bar(x + (i - 1) * w, pcts, w, color=color, alpha=0.85,
+                        label=label)
+        for bar, pct, cnt, n in zip(bars, pcts, counts, n_region):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.4,
+                    f"{pct:.1f}%\n{int(cnt)}/{int(n)}",
+                    ha="center", va="bottom", fontsize=7)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{r}\n(n={int(n)})" for r, n in zip(regions, n_region)])
+    ax.set_ylabel(f"% of neurons in region (p < {alpha})")
+    all_pcts = np.concatenate([
+        100 * sum(tab.loc[regions, c].to_numpy() for c in cats) / n_region
+        for _, cats, _ in _BUCKETS
+    ])
+    ax.set_ylim(0, min(100, float(all_pcts.max()) * 1.35))
+    ax.set_title(f"FR ~ RW prediction error by region & condition  (p < {alpha})\n"
+                 f"window: {window}  ·  {total} neurons total")
+    ax.legend(fontsize=8, frameon=False)
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -166,8 +248,8 @@ def run(window="reward_to_end", alpha=0.05, csv=None, out=None):
 
     print(f"\n=== FR ~ RW prediction error significance (p < {alpha}, window={window}) ===")
     print(f"Total neurons:               {total}")
-    print(f"Significant in G+R:          {pc(int(df['sig_reward'].sum()))}   [chance ≈ {alpha*total:.0f}]")
-    print(f"Significant in G+NR:         {pc(int(df['sig_noreward'].sum()))}   [chance ≈ {alpha*total:.0f}]")
+    print(f"Significant in G+R:          {pc(int(df['sig_reward'].sum()))}   [chance ~= {alpha*total:.0f}]")
+    print(f"Significant in G+NR:         {pc(int(df['sig_noreward'].sum()))}   [chance ~= {alpha*total:.0f}]")
     print(f"Significant in ANY:          {pc(n_any)}")
     print(f"  reward only (+):           {pc(int(cat_counts.get('reward only (+)', 0)))}")
     print(f"  reward only (-):           {pc(int(cat_counts.get('reward only (-)', 0)))}")
@@ -176,7 +258,7 @@ def run(window="reward_to_end", alpha=0.05, csv=None, out=None):
     print(f"  both concordant:           {pc(n_both_c)}")
     print(f"  both discordant:           {pc(n_both_d)}")
     print(f"  (both total:               {pc(n_both_c + n_both_d)}; "
-          f"chance if independent ≈ {alpha*alpha*total:.1f})")
+          f"chance if independent ~= {alpha*alpha*total:.1f})")
 
     print("\nPer-region counts:")
     print(tab.to_string())
@@ -187,6 +269,14 @@ def run(window="reward_to_end", alpha=0.05, csv=None, out=None):
                               f"fr_vs_rw_pe_significance_by_region_signed_{window}.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     plot(tab, alpha, window, total, out)
+
+    simple_out = os.path.join(os.path.dirname(out),
+                              f"fr_vs_rw_pe_any_sig_by_region_{window}.png")
+    plot_simple(tab, alpha, window, total, simple_out)
+
+    unsigned_out = os.path.join(os.path.dirname(out),
+                                f"fr_vs_rw_pe_by_condition_by_region_{window}.png")
+    plot_unsigned(tab, alpha, window, total, unsigned_out)
 
     summ_csv = os.path.splitext(out)[0] + ".csv"
     _tidy(tab, total).to_csv(summ_csv, index=False)
