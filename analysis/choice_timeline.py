@@ -58,6 +58,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from session import Session
 from utils import CONDITIONS, add_session_arg, add_save_arg, maybe_save
+from analysis.hgf.config import REWARD_GAMBLE, REWARD_SAFE
 
 # ---------------------------------------------------------------------------
 # Global font size — change this one number to scale all text in the figure.
@@ -118,7 +119,8 @@ def run_rw_model(
     The perseveration term C_t uses the previous choice of whichever agent
     drives the updates: the participant (shadow) or the model itself (simulate).
 
-        P(Gamble) = σ( β·(Q_G − Q_S) + φ·C_t )
+        P(Gamble) = σ( β·(EV_G − EV_S) + φ·C_t ),  EV_arm = Q_arm · reward magnitude
+        (gamble pays REWARD_GAMBLE, safe REWARD_SAFE; see analysis/hgf/config.py).
         C_t = +1 if that previous choice was Gamble, -1 if Safe, 0 on trial 1.
     φ > 0 → sticky (repeat last choice); φ < 0 → alternating.
 
@@ -176,8 +178,11 @@ def run_rw_model(
         else:
             c_t = 1.0 if last_choice == 1 else -1.0
 
-        # Softmax: P(Gamble) = σ( β·(Q_G − Q_S) + φ·C_t )
-        p_g = 1.0 / (1.0 + np.exp(-beta * (q[1] - q[0]) - phi * c_t))
+        # Softmax over expected VALUE: P(Gamble) = σ( β·(EV_G − EV_S) + φ·C_t ),
+        # EV_arm = Q_arm · reward magnitude (gamble pays REWARD_GAMBLE, safe REWARD_SAFE).
+        ev_gamble = q[1] * REWARD_GAMBLE
+        ev_safe   = q[0] * REWARD_SAFE
+        p_g = 1.0 / (1.0 + np.exp(-beta * (ev_gamble - ev_safe) - phi * c_t))
         p_gamble[t] = p_g
 
         if mode == "shadow":
@@ -281,7 +286,7 @@ def plot_choice_timeline(
     col_gn    = desaturate(col_gr, factor=0.28)  # muted orange
     col_sr    = CONDITIONS["S+R"]["color"]       # seagreen
     col_sn    = desaturate(col_sr, factor=0.28)  # muted green
-    col_wrong = "#c0c0c0"                        # gray — wrong predictions (shadow only)
+    col_wrong = "#ff5d5d"                        # gray — wrong predictions (shadow only)
 
     # ---- Participant masks --------------------------------------------
     p_gr = responding & (arm == 1) & (rew == 1)
@@ -407,7 +412,7 @@ def plot_choice_timeline(
         for ax in (ax_pg, ax_ps):
             ax.set_facecolor("#fafafa")
         for ax in (ax_pr, ax_pp):
-            ax.set_facecolor("#f0f4ff")
+            ax.set_facecolor("#ffffff")
 
         # Participant rows
         tick_row(ax_pg, [
